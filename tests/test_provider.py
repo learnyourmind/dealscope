@@ -338,3 +338,26 @@ def test_upstream_log_drops_free_text_codes():
     finally:
         logger.removeHandler(handler)
     assert all('"code": null' in line for line in records) and len(records) == 2
+
+
+def test_home_record_diagnostic_logs_field_names_only(caplog):
+    body = rentcast_body()
+    body["subjectProperty"]["ownerName"] = "Jane Q Private"
+    body["weird key with spaces"] = "x"
+    h, _ = homes(FakeResponse(body=body))
+    with caplog.at_level(logging.INFO, logger="dealscope"):
+        h.lookup("100 Example St, Austin, TX, 78701")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert '"event": "home_record"' in text and '"has_configuration": true' in text
+    assert '"bedrooms"' in text and '"squareFootage"' in text
+    for forbidden in ("Jane", "Private", "Example St", "test-key-123", "weird key", "2800", "1850"):
+        assert forbidden not in text
+
+
+def test_home_record_diagnostic_shows_a_missing_subject_property(caplog):
+    h, _ = homes(FakeResponse(body={"rent": 1230, "rentRangeLow": 1000, "rentRangeHigh": 1460}))
+    with caplog.at_level(logging.INFO, logger="dealscope"):
+        rec = h.lookup("x")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert rec.rent == 1230.0 and rec.beds is None
+    assert '"has_subject": false' in text and '"has_configuration": false' in text

@@ -13,7 +13,10 @@ The endpoint paths and field names follow RentCast's published API reference
 (developers.rentcast.io). They have not been exercised against the live service in this repo.
 """
 
+import json
+import logging
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -21,6 +24,8 @@ import requests
 
 from .provider import http_get_json
 
+log = logging.getLogger("dealscope")
+_FIELD_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,40}$")
 RENTCAST_RENT_URL = "https://api.rentcast.io/v1/avm/rent/long-term"
 RENTCAST_NAME = "RentCast"
 _USER_AGENT = "DealScope/0.3 (first-pass rental analysis)"
@@ -107,6 +112,22 @@ class RentCastHomes(HomeRecords):
             sqft=_num(subject.get("squareFootage"), minimum=1.0, integer=True),
             property_type=_text(subject.get("propertyType")),
             year_built=_num(subject.get("yearBuilt"), minimum=1600.0, integer=True),
+        )
+        has_configuration = record.beds is not None or bool(record.baths) or bool(record.sqft)
+        # Field NAMES only (never values, address, or key) so a missing-details result can be
+        # diagnosed from the logs without another paid lookup.
+        log.info(
+            json.dumps(
+                {
+                    "event": "home_record",
+                    "source": "rentcast",
+                    "has_rent": bool(record.rent),
+                    "has_configuration": has_configuration,
+                    "has_subject": bool(subject),
+                    "top_fields": sorted(k for k in data if _FIELD_NAME.match(str(k)))[:20],
+                    "subject_fields": sorted(k for k in subject if _FIELD_NAME.match(str(k)))[:30],
+                }
+            )
         )
         has_anything = record.rent or record.beds is not None or record.sqft
         return record if has_anything else None
