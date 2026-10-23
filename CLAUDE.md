@@ -42,7 +42,7 @@ Shipped (see `plan.md` for status; direction per ADR-0005):
 - `templates/index.html`, `static/` — dark/light, no-JS-required UI; no third-party requests.
 - Every value is classified `retrieved | user | estimate | unavailable`. No BUY/PASS verdicts: prices are calculations from the user's criteria.
 
-Not shipped: condition, list price, assessor records, comps, price history, projections, scores, county-level tax. The home is always analyzed as one whole unit, never room by room. With `RENTCAST_API_KEY` the home's configuration and own rent come from RentCast (adapter written from the published API reference, not yet exercised live); without it the unit is a typical home in the ZIP and the configuration shows "not identified". The key is a secret: never log, print, commit, or put it in a fixture. Tax and insurance use unverified state-average constants.
+Not shipped: condition, list price, assessor records, comps, price history, projections, scores, county-level tax. The home is always analyzed as one whole unit, never room by room. With `RENTCAST_API_KEY` the home's configuration and own rent come from RentCast (verified live on 2026-10-23); without it the unit is a typical home in the ZIP and the configuration shows "not identified". The key is a secret: never log, print, commit, or put it in a fixture. Tax and insurance use unverified state-average constants.
 
 When changing functionality, distinguish clearly between what is implemented and what is aspirational. Update the README whenever the shipped behavior or setup instructions change.
 

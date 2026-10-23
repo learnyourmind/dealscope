@@ -661,8 +661,8 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
 | 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
 | 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic | approved | owner (chat) |
-| 2026-10-23 | Incident | The RentCast key was committed to `.env.example` on public branch `feature/single-unit-home` (commit b14a61e; not on `main`). Rotation required; CI guard added (plan 4.12) | open until the key is rotated | owner |
-| 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; adapter built, key to be supplied by the owner | approved; key pending | owner (chat) |
+| 2026-10-23 | Incident | The RentCast key was committed to `.env.example` on public branch `feature/single-unit-home` (commit b14a61e; not on `main`). Owner rotated the key and set the new one in Vercel (plan 4.10); CI guard added (plan 4.12) | rotated; deleting the old branch is still open | owner |
+| 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; owner supplied a rotated key in Vercel (Production only); verified live (3 bd / 2 ba / 1,878 sq ft record and rent estimate with range for the test address) | approved; verified live | owner (chat) |
 
 ### Document roles
 
