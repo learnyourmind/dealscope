@@ -97,12 +97,14 @@ Start each only after its data rights and definitions exist (spec §8 Phase 3). 
 | ID | Task | Satisfies | Depends | Who | Status | Done when |
 |---|---|---|---|---|---|---|
 | 4.1 | Replace manual entry and Redfin with Census geocoding + bundled Zillow ZIP snapshot; price solver (PITI break-even, all-in break-even, target) per bedroom scenario; remove `property`/`candidate_id` inputs | FR-02…FR-07, FR-09…FR-11, FR-22 withdrawn | — | AI | done | Solver round-trip and golden price-vector tests pass; address-only request returns prices; live Census lookup verified once manually |
-| 4.2 | Redesigned UI: address-first hero, headline price, bedroom cards with bars, monthly-math drill-down, assumptions, sources, limitations; no third-party requests | FR-01, FR-05, FR-08, FR-12, §5.4 | 4.1 | AI | done | axe-core 4.10.2 on production (home and results, dark and light): one real finding (`scrollable-region-focusable` on the table wrapper), fixed; gradient-text contrast checked by hand (all ≥ 5.0:1) |
+| 4.2 | Redesigned UI: address-first hero, headline price, whole-home card with bars, monthly-math card, assumptions, sources, limitations; no third-party requests | FR-01, FR-05, FR-08, FR-12, §5.4 | 4.1 | AI | done | axe-core 4.10.2 on production (home and results, dark and light): one real finding (`scrollable-region-focusable` on the table wrapper), fixed; gradient-text contrast checked by hand (all ≥ 5.0:1) |
 | 4.3 | Update `intent.md`, `spec.md` v0.3, README, ADR-0005, runbook | FR-13 | 4.1 | AI | done | Docs match shipped behavior |
 | 4.4 | Monthly snapshot refresh: scheduled workflow runs `scripts/update_market_data.py` and opens a PR; review as-of dates | OPS-10 | 4.1 | AI+H | todo | PR opened automatically on schedule |
 | 4.5 | County-level property tax (and optionally rent) from Census ACS with a free API key supplied via host secret | spec §7 | owner obtains a free key | AI+H | todo | Tax rate shown as county-level public data; fixtures from the documented ACS response shape |
-| 4.6 | Bedroom-level rent from a permitted source; rent ranges; confirm Zillow terms for wide/commercial use | FR-14, spec §7 gate | P0-1 | H | todo | Heuristic factors removed or validated |
+| 4.6 | Confirm Zillow Research data terms for wide/commercial use | spec §7 gate | P0-1 | H | todo | Recorded in the decision log |
 | 4.7 | Product/legal review of price wording ("up to", "target"); screen-reader pass | FR-11 | 4.2 | H | todo | Recorded in the decision log |
+| 4.8 | Analyze one whole home as a single unit: remove the bedroom scenarios and heuristic; add `home.configuration` (`not_identified`); one-card UI | FR-06, FR-23 | 4.1 | AI | done | Tests assert no `scenarios`, no per-bedroom text, configuration unavailable; UI checked in the browser |
+| 4.9 | Identify the home's configuration (beds, baths, size) and its own rent/value from a **permitted** source; Zillow scraping is not allowed. Owner picks the source (for example a free-tier property-data API with a host-held key) | FR-23, FR-14 | owner decision | AI+H | blocked on owner | Configuration shown as retrieved for a real address; fixtures from the provider's documented response; live check once with the owner's key |
 
 ## Cross-cutting definition of done (every task)
 

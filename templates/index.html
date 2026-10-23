@@ -106,9 +106,9 @@
 
   {% if analysis %}
   {% set a = analysis %}
-  {% set top = a.scenarios[0] %}
+  {% set top = a.home %}
   {% set ns = namespace(max=1) %}
-  {% for sc in a.scenarios %}{% for k, p in sc.prices.items() %}{% if p.kind != 'unavailable' and p.value > ns.max %}{% set ns.max = p.value %}{% endif %}{% endfor %}{% endfor %}
+  {% for k, p in top.prices.items() %}{% if p.kind != 'unavailable' and p.value > ns.max %}{% set ns.max = p.value %}{% endif %}{% endfor %}
 
   <section class="wrap results" aria-labelledby="results-h">
     <p class="eyebrow">Results</p>
@@ -135,47 +135,56 @@
     {% endif %}
     {% if a.qualifier.qualified %}<p class="note warn">{{ a.qualifier.note }}</p>{% endif %}
 
-    <h3>By bedroom count</h3>
-    <p class="muted small">We don't retrieve bedroom counts, so each size is shown. Rent for each size is a rough scaling of the ZIP's typical rent.</p>
+    <h3>The numbers for one whole home</h3>
+    <p class="muted small">{{ top.configuration.note }} Nothing is priced room by room.</p>
     <div class="cards">
-      {% for sc in a.scenarios[1:] %}
-      <article class="card" aria-labelledby="c-{{ sc.key }}">
+      <article class="card" aria-labelledby="c-home">
         <header>
-          <h4 id="c-{{ sc.key }}">{{ sc.label }}</h4>
-          <p class="rent">{{ money(sc.rent) }}<small>/mo rent · {{ kind_label(sc.rent.kind) }}</small></p>
+          <h4 id="c-home">{{ top.label }}</h4>
+          <p class="rent">{{ money(top.rent) }}<small>/mo rent · {{ kind_label(top.rent.kind) }}</small></p>
         </header>
         <ul class="prices">
           {% for key, title in [('target', 'Target price'), ('allin_breakeven', 'All-in break-even'), ('piti_breakeven', 'PITI break-even')] %}
-          {% set p = sc.prices[key] %}
+          {% set p = top.prices[key] %}
           <li class="{{ key }}">
             <div class="line"><span>{{ title }}</span><strong>{{ money(p) }}</strong></div>
             {% if p.kind != 'unavailable' %}<div class="track" aria-hidden="true"><span style="width: {{ (p.value / ns.max * 100) | round(1) }}%"></span></div>{% endif %}
           </li>
           {% endfor %}
         </ul>
-        {% if sc.monthly_at_price.target %}
-        {% set m = sc.monthly_at_price.target %}
-        <details>
-          <summary>Monthly math at the target price</summary>
-          <table>
-            <caption class="sr">Monthly costs at the {{ sc.label }} target price</caption>
-            <tbody>
-              <tr><th scope="row">Rent</th><td class="n">{{ m.gross_rent | usd }}</td></tr>
-              <tr><th scope="row">Principal and interest</th><td class="n">−{{ m.principal_interest | usd }}</td></tr>
-              <tr><th scope="row">Property tax</th><td class="n">−{{ m.property_tax | usd }}</td></tr>
-              <tr><th scope="row">Insurance</th><td class="n">−{{ m.insurance | usd }}</td></tr>
-              <tr class="sub"><th scope="row">PITI total</th><td class="n">{{ m.piti_total | usd }}</td></tr>
-              <tr><th scope="row">Vacancy + management</th><td class="n">−{{ (m.vacancy + m.management) | usd }}</td></tr>
-              <tr><th scope="row">Maintenance reserve</th><td class="n">−{{ m.capex_reserve | usd }}</td></tr>
-              {% if m.hoa %}<tr><th scope="row">HOA</th><td class="n">−{{ m.hoa | usd }}</td></tr>{% endif %}
-              <tr class="total"><th scope="row">Cash flow</th><td class="n">{{ m.cash_flow | usd }}</td></tr>
-            </tbody>
-          </table>
-          <p class="small muted">Down payment {{ m.down_payment | usd(false) }}. Cap rate {{ sc.at_target.cap_rate_pct | pct }}; cash-on-cash {{ sc.at_target.cash_on_cash_pct | pct }} (down payment only).</p>
-        </details>
-        {% endif %}
       </article>
-      {% endfor %}
+
+      {% if top.monthly_at_price.target %}
+      {% set m = top.monthly_at_price.target %}
+      <article class="card" aria-labelledby="c-math">
+        <h4 id="c-math">Monthly math at the target price</h4>
+        <table>
+          <caption class="sr">Monthly costs at the target price for one whole home</caption>
+          <tbody>
+            <tr><th scope="row">Rent</th><td class="n">{{ m.gross_rent | usd }}</td></tr>
+            <tr><th scope="row">Principal and interest</th><td class="n">−{{ m.principal_interest | usd }}</td></tr>
+            <tr><th scope="row">Property tax</th><td class="n">−{{ m.property_tax | usd }}</td></tr>
+            <tr><th scope="row">Insurance</th><td class="n">−{{ m.insurance | usd }}</td></tr>
+            <tr class="sub"><th scope="row">PITI total</th><td class="n">{{ m.piti_total | usd }}</td></tr>
+            <tr><th scope="row">Vacancy + management</th><td class="n">−{{ (m.vacancy + m.management) | usd }}</td></tr>
+            <tr><th scope="row">Maintenance reserve</th><td class="n">−{{ m.capex_reserve | usd }}</td></tr>
+            {% if m.hoa %}<tr><th scope="row">HOA</th><td class="n">−{{ m.hoa | usd }}</td></tr>{% endif %}
+            <tr class="total"><th scope="row">Cash flow</th><td class="n">{{ m.cash_flow | usd }}</td></tr>
+          </tbody>
+        </table>
+        <p class="small muted">Down payment {{ m.down_payment | usd(false) }}. Cap rate {{ top.at_target.cap_rate_pct | pct }}; cash-on-cash {{ top.at_target.cash_on_cash_pct | pct }} (down payment only).</p>
+      </article>
+      {% endif %}
+
+      <article class="card" aria-labelledby="c-config">
+        <h4 id="c-config">Home configuration</h4>
+        <dl class="cfg">
+          <div><dt>Bedrooms</dt><dd>{% if top.configuration.beds.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.beds.value }}{% endif %}</dd></div>
+          <div><dt>Bathrooms</dt><dd>{% if top.configuration.baths.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.baths.value }}{% endif %}</dd></div>
+          <div><dt>Size</dt><dd>{% if top.configuration.sqft.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.sqft.value }} sq ft{% endif %}</dd></div>
+        </dl>
+        <p class="small muted">{{ top.configuration.beds.reason or top.configuration.note }}</p>
+      </article>
     </div>
 
     <h3>How to read the prices</h3>

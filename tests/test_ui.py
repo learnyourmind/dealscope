@@ -15,7 +15,11 @@ def test_form_post_renders_results_without_javascript(client):
     resp = client.post("/", data=FORM)
     html = resp.get_data(as_text=True)
     assert resp.status_code == 200
-    assert "Up to $" in html and "By bedroom count" in html and "PITI break-even" in html
+    assert (
+        "Up to $" in html and "The numbers for one whole home" in html and "PITI break-even" in html
+    )
+    assert "Nothing is priced room by room" in html and "Home configuration" in html
+    assert "Not identified" in html and "By bedroom" not in html and "1 bedroom" not in html
     assert "Public data" in html and "Estimate" in html  # source type shown for every figure
     assert "Monthly math at the target price" in html and "PITI total" in html
     assert "ZIP 78701" in html and "Zillow" in html and "Census" in html

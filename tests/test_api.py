@@ -13,25 +13,25 @@ def post(client, body, **kw):
     return client.post("/analyze", json=body, **kw)
 
 
-def test_address_only_request_succeeds_with_prices_by_bedroom(client):
+def test_address_only_request_returns_one_whole_home_result(client):
     resp = post(client, BODY)
     assert resp.status_code == 200
     a = resp.get_json()["analysis"]
     assert a["location"]["zip"] == "78701" and a["market"]["typical_rent"]["value"] == 3177
-    assert [s["key"] for s in a["scenarios"]] == ["typical", "1br", "2br", "3br", "4br"]
-    typical = a["scenarios"][0]["prices"]
+    assert "scenarios" not in a and a["home"]["configuration"]["status"] == "not_identified"
+    prices = a["home"]["prices"]
     assert (
-        typical["piti_breakeven"]["value"]
-        > typical["allin_breakeven"]["value"]
-        >= typical["target"]["value"]
+        prices["piti_breakeven"]["value"]
+        > prices["allin_breakeven"]["value"]
+        >= prices["target"]["value"]
         > 0
     )
 
 
 def test_assumptions_change_the_answer(client):
-    base = post(client, BODY).get_json()["analysis"]["scenarios"][0]["prices"]["target"]["value"]
+    base = post(client, BODY).get_json()["analysis"]["home"]["prices"]["target"]["value"]
     high_rate = post(client, dict(BODY, assumptions={"annual_interest_rate_pct": 9.5}))
-    assert high_rate.get_json()["analysis"]["scenarios"][0]["prices"]["target"]["value"] < base
+    assert high_rate.get_json()["analysis"]["home"]["prices"]["target"]["value"] < base
 
 
 def test_ambiguous_matches_require_selection(market):

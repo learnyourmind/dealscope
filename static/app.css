@@ -167,3 +167,8 @@ h3 { font-size: 1.15rem; letter-spacing: -.01em; margin: 2.2rem 0 .5rem; }
   .defs { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+.cfg { margin: 0; display: grid; gap: .4rem; }
+.cfg > div { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-bottom: 1px dashed var(--border); }
+.cfg dt { color: var(--muted); }
+.cfg dd { margin: 0; font-weight: 600; }

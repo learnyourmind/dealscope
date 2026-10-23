@@ -134,37 +134,44 @@ def analysis(req=None, location=LOC, market=MKT):
     return build_analysis(req or AnalysisRequest(address="100 Example St"), location, market)
 
 
-def test_scenarios_cover_typical_and_1_to_4_bedrooms_in_rent_order():
+def test_result_is_one_whole_home_unit_never_room_by_room():
     a = analysis()
-    assert [s["key"] for s in a["scenarios"]] == ["typical", "1br", "2br", "3br", "4br"]
-    rents = [s["rent"]["value"] for s in a["scenarios"][1:]]
-    assert rents == sorted(rents)
+    assert "scenarios" not in a and a["home"]["label"] == "Typical home in this ZIP"
+    text = json.dumps(a).lower()
+    assert "1br" not in text and "2 bedrooms" not in text and "bedroom factor" not in text
+    assert any("whole unit" in t and "never rented room by room" in t for t in a["limitations"])
 
 
-def test_typical_rent_is_public_data_and_bedroom_rents_are_estimates():
+def test_home_configuration_is_reported_as_not_identified_not_guessed():
+    cfg = analysis()["home"]["configuration"]
+    assert cfg["status"] == "not_identified"
+    for field in ("beds", "baths", "sqft"):
+        assert cfg[field]["kind"] == "unavailable" and "value" not in cfg[field]
+
+
+def test_typical_rent_is_public_data_with_source_and_home_value_context():
     a = analysis()
-    typical, one_br = a["scenarios"][0], a["scenarios"][1]
-    assert typical["rent"]["kind"] == "retrieved" and "ZIP 78701" in typical["rent"]["source"]
-    assert one_br["rent"]["kind"] == "estimate" and one_br["rent"]["confidence"] == "low"
+    rent = a["home"]["rent"]
+    assert rent["kind"] == "retrieved" and "ZIP 78701" in rent["source"]
+    assert "one whole unit" in rent["basis"]
+    assert a["market"]["typical_rent"] == rent
     assert a["market"]["typical_home_value"]["kind"] == "retrieved"
 
 
 def test_every_price_is_labelled_rounded_and_meets_the_goal():
-    a = analysis(AnalysisRequest(address="x", min_monthly_cash_flow=250))
-    for sc in a["scenarios"]:
-        for price in sc["prices"].values():
-            assert price["kind"] == "estimate" and price["value"] % 1000 == 0
-        at = sc["monthly_at_price"]["target"]
-        assert at["cash_flow"] >= 250 - 0.01
-        assert at["piti_total"] == pytest.approx(
-            at["principal_interest"] + at["property_tax"] + at["insurance"], abs=0.02
-        )
+    home = analysis(AnalysisRequest(address="x", min_monthly_cash_flow=250))["home"]
+    for price in home["prices"].values():
+        assert price["kind"] == "estimate" and price["value"] % 1000 == 0
+    at = home["monthly_at_price"]["target"]
+    assert at["cash_flow"] >= 250 - 0.01
+    assert at["piti_total"] == pytest.approx(
+        at["principal_interest"] + at["property_tax"] + at["insurance"], abs=0.02
+    )
 
 
 def test_target_is_below_all_in_which_is_below_piti_breakeven():
-    for sc in analysis()["scenarios"]:
-        p = {k: v["value"] for k, v in sc["prices"].items()}
-        assert p["piti_breakeven"] > p["allin_breakeven"] >= p["target"]
+    p = {k: v["value"] for k, v in analysis()["home"]["prices"].items()}
+    assert p["piti_breakeven"] > p["allin_breakeven"] >= p["target"]
 
 
 def test_unknown_hoa_is_flagged_and_known_hoa_lowers_prices():
@@ -172,15 +179,12 @@ def test_unknown_hoa_is_flagged_and_known_hoa_lowers_prices():
     known = analysis(AnalysisRequest(address="x", hoa_monthly=300))
     assert unknown["qualifier"]["qualified"] is True and "qualifier" and not known["qualifier"]
     assert unknown["assumptions"]["hoa_monthly"]["kind"] == "unavailable"
-    assert (
-        known["scenarios"][0]["prices"]["target"]["value"]
-        < unknown["scenarios"][0]["prices"]["target"]["value"]
-    )
+    assert known["home"]["prices"]["target"]["value"] < unknown["home"]["prices"]["target"]["value"]
 
 
 def test_rent_adjustment_makes_typical_rent_an_estimate():
     a = analysis(AnalysisRequest(address="x", rent_adjustment_pct=10))
-    rent = a["scenarios"][0]["rent"]
+    rent = a["home"]["rent"]
     assert rent["kind"] == "estimate" and rent["value"] == round(3177 * 1.1)
 
 
@@ -190,10 +194,7 @@ def test_state_average_rates_are_low_confidence_and_overridable():
     assert tax["kind"] == "estimate" and tax["confidence"] == "low" and "TX" in tax["basis"]
     own = analysis(AnalysisRequest(address="x", property_tax_rate_pct=3.0, insurance_rate_pct=2.0))
     assert own["assumptions"]["property_tax_rate_pct"]["kind"] == "user"
-    assert (
-        own["scenarios"][0]["prices"]["target"]["value"]
-        < a["scenarios"][0]["prices"]["target"]["value"]
-    )
+    assert own["home"]["prices"]["target"]["value"] < a["home"]["prices"]["target"]["value"]
 
 
 def test_location_without_state_average_requires_entered_rates():
@@ -209,14 +210,14 @@ def test_location_without_state_average_requires_entered_rates():
         location=dc,
         market=ZipMarket("20500", "DC", 3000.0, 700000.0, "2026-09", "2026-09", "R", "V"),
     )
-    assert ok["scenarios"][0]["prices"]["target"]["kind"] == "estimate"
+    assert ok["home"]["prices"]["target"]["kind"] == "estimate"
 
 
 def test_unreachable_target_is_unavailable_not_zero():
     a = analysis(AnalysisRequest(address="x", min_monthly_cash_flow=10000))
-    target = a["scenarios"][0]["prices"]["target"]
+    target = a["home"]["prices"]["target"]
     assert target["kind"] == "unavailable" and "value" not in target
-    assert a["scenarios"][0]["monthly_at_price"].get("target") is None
+    assert a["home"]["monthly_at_price"].get("target") is None
 
 
 def test_no_verdict_or_recommendation_words_in_output():

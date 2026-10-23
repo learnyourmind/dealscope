@@ -115,15 +115,6 @@ INS_RATES = {
 
 STATES = frozenset(TAX_RATES)
 
-# Bedroom scaling of the ZIP's typical rent. Prototype benchmark rents by bedroom count
-# (1BR $1,100 ... 4BR $2,300) divided by their 2BR/3BR midpoint ($1,635), which stands in for
-# "typical". A rough, unverified heuristic: always shown as a low-confidence estimate.
-BEDROOM_RENT_FACTORS = {1: 0.67, 2: 0.87, 3: 1.13, 4: 1.41}
-BEDROOM_FACTOR_BASIS = (
-    "Typical ZIP rent scaled by a rough bedroom factor "
-    "(1BR 0.67, 2BR 0.87, 3BR 1.13, 4BR 1.41) from prototype benchmarks; not market data."
-)
-
 # Default operating assumptions (spec §5.2).
 VACANCY_PCT = 5.0
 MANAGEMENT_PCT = 8.0

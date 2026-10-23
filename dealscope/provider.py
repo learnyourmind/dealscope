@@ -5,7 +5,7 @@
   rebuilt by scripts/update_market_data.py (free, attribution shown in the app).
 
 There is no free national API for county assessor records, and Redfin/Zillow listing pages are
-not licensed for this use, so property-level facts (price, beds, sqft) are not retrieved.
+not licensed for this use, so home-level facts (price, beds, baths, sqft) are not retrieved.
 """
 
 import json

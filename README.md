@@ -25,8 +25,8 @@ Type an address; get the price a rental can support.
 
 - **Input:** a US address (everything else is optional). No price, bedroom, or room-count entry.
 - **Data:** US Census Geocoder (address → ZIP, state, county) and a bundled snapshot of Zillow Research's public ZIP-level rent and home-value indexes. Tax and insurance use labeled state averages unless you enter rates.
-- **Output:** for a typical home and for 1–4 bedrooms — estimated rent and three prices: **PITI break-even** (rent covers mortgage principal and interest, property tax and insurance), **all-in break-even** (also covers vacancy, management and maintenance), and **target** (meets your monthly cash-flow goal), with the monthly math, cap rate, cash-on-cash, and how the price compares with typical home values in the ZIP.
-- **Not shipped:** property-level facts (list price, bedrooms, assessor records — no free national source), comparable sales, price history, projections, scores. Prices are calculations from your criteria, not appraisals or advice. See [`intent.md`](./intent.md), [`spec.md`](./spec.md), [`plan.md`](./plan.md).
+- **Output:** for one whole home (a typical home in the ZIP; never room by room) — estimated rent and three prices: **PITI break-even** (rent covers mortgage principal and interest, property tax and insurance), **all-in break-even** (also covers vacancy, management and maintenance), and **target** (meets your monthly cash-flow goal), with the monthly math, cap rate, cash-on-cash, and how the price compares with typical home values in the ZIP. The home's configuration (bedrooms, baths, size) is shown as "not identified" until a permitted data source is configured.
+- **Not shipped:** home-level facts (bedrooms, baths, size, list price, assessor records), comparable sales, price history, projections, scores. Prices are calculations from your criteria, not appraisals or advice. See [`intent.md`](./intent.md), [`spec.md`](./spec.md), [`plan.md`](./plan.md).
 
 ## JSON API
 
@@ -41,7 +41,7 @@ Type an address; get the price a rental can support.
 }
 ```
 
-Success: `{"success": true, "analysis": {location, market, assumptions, scenarios[], qualifier, limitations, sources}}`; each scenario has `rent`, `prices {piti_breakeven, allin_breakeven, target}`, `monthly_at_price`, and `at_target`. Every value carries `kind` (`retrieved`, `user`, `estimate`, `unavailable`) and its source or basis. Failures: `{"success": false, "error": {code, message, retryable, request_id}}` — 400 `INVALID_REQUEST`/`OUT_OF_RANGE`, 404 `PROPERTY_NOT_FOUND`, 422 `AMBIGUOUS_MATCH`/`INSUFFICIENT_DATA`, 429, 502/503/504 `PROVIDER_*`, 500. Bounds and formulas: [`spec.md`](./spec.md) §5.
+Success: `{"success": true, "analysis": {location, market, assumptions, home, qualifier, limitations, sources}}`; the single `home` object has `label`, `configuration` (status `not_identified` until a source exists), `rent`, `prices {piti_breakeven, allin_breakeven, target}`, `monthly_at_price`, and `at_target`. Every value carries `kind` (`retrieved`, `user`, `estimate`, `unavailable`) and its source or basis. Failures: `{"success": false, "error": {code, message, retryable, request_id}}` — 400 `INVALID_REQUEST`/`OUT_OF_RANGE`, 404 `PROPERTY_NOT_FOUND`, 422 `AMBIGUOUS_MATCH`/`INSUFFICIENT_DATA`, 429, 502/503/504 `PROVIDER_*`, 500. Bounds and formulas: [`spec.md`](./spec.md) §5.
 
 ## Development
 
@@ -61,7 +61,7 @@ Deployed on [Vercel](https://vercel.com) (Flask app served as a Python function;
 - **Address → area:** the Census Geocoder returns the standardized address and ZIP; several matches ask you to pick one.
 - **Rent and value:** the ZIP's typical rent (Zillow ZORI) and typical home value (Zillow ZHVI) from `data/zip_market.json`, rebuilt monthly with `python scripts/update_market_data.py`.
 - **Prices:** closed-form solver — every ownership cost except HOA scales with price, so the highest price meeting a cash-flow goal is `(income − HOA − goal) ÷ cost-per-dollar-of-price`. Prices are rounded down to $1,000.
-- **Bedrooms:** typical rent × a rough heuristic factor (1BR 0.67 … 4BR 1.41); shown as low-confidence estimates.
+- **One unit:** the ZIP's typical rent is used for the whole home; there is no per-room or per-bedroom pricing.
 - **Limits:** state-average tax/insurance, fixed vacancy 5% / management 8% / maintenance 1% of price per year, unknown HOA counted as $0 and flagged.
 
 ## Publishing as Mobile App
