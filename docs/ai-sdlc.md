@@ -11,7 +11,7 @@ How humans and AI agents (Claude Code or any comparable tool) build, verify, and
 | In what order | `plan.md` | AI drafts, human approves | A task completes, is split, or a dependency changes |
 | Do it | GitHub issue / branch / PR (`.github/ISSUE_TEMPLATE/task.md`) | AI executes, human reviews | Per task |
 | Prove it | `tests/`, CI, smoke check | Both | Every PR |
-| Run it | `Dockerfile`, `render.yaml`, `docs/runbook.md` | Both | Deployment changes |
+| Run it | `.python-version`, `.vercelignore`, `Dockerfile`, `docs/runbook.md` | Both | Deployment changes |
 | Why we chose | `docs/adr/` | Whoever decides | An architectural choice is made or reversed |
 
 Agent context files — `CLAUDE.md` (engineering guide, loaded automatically), `AGENTS.md` (pointer for other tools), `.claude/` (permissions, commands, reviewer subagent) — encode the rules so each session starts with the same constraints.
@@ -59,7 +59,7 @@ Agent context files — `CLAUDE.md` (engineering guide, loaded automatically), `
 | Pull request | CI: lint, format, tests + coverage, `pip-audit`, Docker build + container smoke | `.github/workflows/ci.yml` |
 | Review | Human review; `spec-reviewer` agent output attached | PR |
 | Merge | Branch protection: PR + required checks `test`, `docker` | GitHub settings (plan D7) |
-| Deploy | Render deploys only after checks pass; health check `/healthz` gates traffic | `render.yaml` |
+| Deploy | Vercel production deploys come from `main` (Git integration) after checks pass | Vercel project settings, `docs/runbook.md` |
 | Post-deploy | `scripts/smoke.sh` via the `Deployed smoke check` workflow | `.github/workflows/smoke.yml` |
 | Ongoing | Scheduled smoke; Dependabot PRs go through the same gates | Workflows, `dependabot.yml` |
 

@@ -116,7 +116,7 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | FR-19 | P2 | Add investor scores only if their inputs, weighting, interpretation, and limitations can be explained; scores must not conceal missing data. |
 | FR-20 | P2 | Add risk/opportunity summaries based on traceable data or explicit rules. No unsupported “expert” claims. |
 | FR-21 | P0 | Expose `GET /healthz` returning `200 {"status":"ok","version":"<app version>"}` without calling any upstream provider, for deployment health checks (see OPS-04). |
-| FR-22 | P1 | When the provider is unavailable or returns insufficient data, let the user enter price, beds, and state manually; such values are classified as user assumptions (§5.2) and the result is labeled as based on user-entered facts. |
+| FR-22 | P0 | When the provider is unavailable or returns insufficient data, let the user enter price, beds, and state manually; such values are classified as user assumptions (§5.2) and the result is labeled as based on user-entered facts. Because the provider ships disabled (D-01), this is the primary path at launch. Optional `assumptions.monthly_rent` (USD 100–50,000) lets the user override the rent estimate (classified `user`). |
 
 ### 5.2 Data and calculation requirements
 
@@ -156,6 +156,12 @@ Enforced server-side (FR-02); the UI mirrors them for convenience but is never t
 | `down_payment_pct` | number | 5 ≤ x ≤ 100 (investor financing rarely goes below 15–25%; 5 is a permissive floor) | 20 |
 | `annual_interest_rate_pct` | number | 0 ≤ x ≤ 25; finite | 7.0 |
 | `loan_term_years` | integer | one of 15, 20, 30 | 30 |
+| `monthly_rent` | number, optional | 100 ≤ x ≤ 50,000; overrides the model estimate | model estimate |
+| `property.purchase_price` | number | 10,000 ≤ x ≤ 50,000,000 | required with `property` |
+| `property.beds` | integer | 0–10 (rent estimates cover 1–5) | required with `property` |
+| `property.state` | string | supported two-letter state code | required with `property` |
+| `property.hoa_monthly` | number, optional | 0–10,000; omitted ⇒ unavailable | unavailable |
+| `candidate_id` | string, optional | 1–12 digits | none |
 
 `down_payment_pct = 100` gives a zero loan: principal and interest is `0`, not a division error. `annual_interest_rate_pct = 0` divides the loan evenly over the term.
 
@@ -275,6 +281,8 @@ Use appropriate HTTP status codes (for example 400 for invalid input, 404 for no
 | `PROVIDER_RATE_LIMITED` | 503 | Upstream returned 429/403-style throttling; include `Retry-After` only if the provider supplied it | yes, later |
 | `PROVIDER_UNAVAILABLE` | 502 | Upstream 5xx, connection failure, or malformed/unrecognized payload | yes |
 | `RATE_LIMITED` | 429 | This app's own per-client limit (§7 P0-8) | yes |
+| `NOT_FOUND` | 404 | Unknown route | no |
+| `METHOD_NOT_ALLOWED` | 405 | Wrong HTTP method for a route | no |
 | `INTERNAL_ERROR` | 500 | Unexpected failure; message is generic, a `request_id` is returned and logged | yes |
 
 Every response carries an `X-Request-ID` header (generated if absent) that is also written to server logs. `GET /healthz` is exempt from the envelope and from rate limiting.
@@ -348,14 +356,14 @@ Therefore this specification cannot certify conformance to brand guidelines. Unt
 | ID | Priority | Requirement |
 |---|---|---|
 | OPS-01 | P0 | Every change reaches `main` through a pull request whose CI run passes: lint, format check, tests with the coverage gate, and dependency vulnerability audit. `main` is protected against direct pushes and failing checks. |
-| OPS-02 | P0 | The app builds into a container image from a checked-in `Dockerfile`: non-root user, pinned Python minor version, runs Gunicorn bound to `$PORT`, contains no secrets, and has a `HEALTHCHECK` on `/healthz`. |
-| OPS-03 | P0 | Deployment is declarative (`render.yaml` for the chosen host, §6.4) and automatic from `main` only after CI passes. Production is HTTPS-only. |
+| OPS-02 | P0 | The app builds into a portable container image from a checked-in `Dockerfile` (verified in CI, independent of the host): non-root user, pinned Python minor version, runs Gunicorn bound to `$PORT`, contains no secrets, and has a `HEALTHCHECK` on `/healthz`. |
+| OPS-03 | P0 | Deployment configuration is checked in (`.python-version`, `.vercelignore`, `requirements.txt` for Vercel, §6.4). Production deploys come from `main` after CI passes (Vercel Git integration with `main` as the production branch; the first release was deployed with the CLI). Production is HTTPS-only. |
 | OPS-04 | P0 | A post-deploy smoke check calls `GET /healthz` and `GET /` and fails the release if either is not 200. |
 | OPS-05 | P0 | Rollback to the previous release is documented in `docs/runbook.md` and achievable in minutes without a code change (host "redeploy previous" or git revert). |
 | OPS-06 | P0 | Configuration is environment-driven (§6.3); `.env.example` lists every variable without secret values; `.env` is git-ignored. |
 | OPS-07 | P0 | Logs are structured one-line records to stdout with `request_id`, route, status, latency, and error code; they exclude addresses, request bodies, and upstream payloads (§7 Privacy). |
 | OPS-08 | P1 | Dependency updates arrive as automated pull requests (Dependabot) and pass the same CI gates. |
-| OPS-09 | P1 | A gated *staging* environment (or Render preview environments) runs the smoke check before production promotion. |
+| OPS-09 | P1 | A gated *staging* environment (or Vercel preview deployments) runs the smoke check before production promotion. |
 | OPS-10 | P1 | Provider-contract tests replay recorded fixtures of Redfin payloads and run nightly against the live provider **only if** Phase 0 approves such use; failure opens an issue rather than blocking unrelated pull requests. |
 | OPS-11 | P2 | Alerting on elevated 5xx or `PROVIDER_*` rates and on `/healthz` failure. |
 
@@ -419,7 +427,7 @@ Every value in `analysis.property`, `analysis.assumptions`, and `analysis.metric
 | `PORT` | `5000` | Listen port (set by the host) |
 | `APP_ENV` | `development` | `production` disables debug-only behavior |
 | `CORS_ORIGINS` | empty (CORS off) | Comma-separated allowed origins; empty means same-origin only |
-| `PROPERTY_PROVIDER` | `redfin` | Selects the adapter; `disabled` forces the manual-entry path (FR-22) |
+| `PROPERTY_PROVIDER` | `disabled` | Selects the adapter; `disabled` forces the manual-entry path (FR-22) |
 | `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_READ_TIMEOUT_S` | `3` / `8` | §5.5 |
 | `RATE_LIMIT` | `20/minute` | §5.5; empty disables (use only behind an edge limiter) |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
@@ -433,13 +441,13 @@ No variable holds a secret in the initial release. A future licensed provider ad
 developer / AI agent → feature branch → pull request ─► CI (lint · format · test · coverage · audit · docker build)
                                                         │ pass + review
                                                         ▼
-                                                      main ─► Render (render.yaml, autoDeploy after checks)
-                                                                  │  Docker image → Gunicorn → Flask
+                                                      main ─► Vercel (Python runtime serves module-level Flask `app`)
+                                                                  │  static assets + serverless function
                                                                   ▼
-                                              post-deploy smoke: /healthz, /   → failure ⇒ rollback (docs/runbook.md)
+                                              post-deploy smoke: /healthz, /   → failure ⇒ promote previous deployment (docs/runbook.md)
 ```
 
-Render is the proposed first host because the README already lists it, it supports a free HTTPS web service from a Dockerfile, health-check-gated deploys, and one-click rollback. The `Dockerfile` keeps the app portable to any container host (Railway, Fly.io, Cloud Run) if the decision changes. A single instance is sufficient: the app is stateless with no database (see below), so scaling is horizontal Gunicorn workers/instances.
+Vercel is the chosen host (ADR-0004, supersedes the Render proposal in ADR-0003): it serves the Flask app as a serverless function over HTTPS with instant rollback by promoting an earlier deployment. The `Dockerfile` is kept and built in CI so the app stays portable to any container host. Consequences of serverless: the app must stay stateless (it is — no database), the rate limiter is per instance (spec §5.5 permits an edge limiter instead), and cold starts add latency to the first request.
 
 #### Data persistence
 
@@ -460,7 +468,7 @@ The following are engineering requirements for this app, not a substitute for a 
 7. **Dependency hygiene:** Keep dependencies minimal and pinned/managed according to the project’s chosen dependency policy. Review updates for Flask, Requests, and any added packages.
 8. **Request limits:** Configure a reasonable maximum request body size and avoid unbounded expensive provider calls. Add rate limiting before public exposure if the hosting environment does not provide it.
 9. **Template safety:** Continue using escaped template interpolation. Do not mark user/provider strings as trusted HTML. Sanitize any future client-rendered markup.
-10. **Production server:** Do not use Flask's development server in production; use the configured Gunicorn process.
+10. **Production server:** Do not use Flask's development server in production; use Gunicorn (Docker, `Procfile`) or the host runtime (Vercel).
 
 ### Privacy
 
@@ -608,7 +616,10 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 |---|---|---|---|---|
 | 2026-10-23 | D-01 … D-10 | Defaults in §11.1 | proposed | — |
 | 2026-10-23 | ADR-0002 | Keep Flask; server-rendered UI; no database or AI service | accepted (follows existing spec §3.2/§6) | engineering |
-| 2026-10-23 | ADR-0003 | Docker image on Render, CI-gated deploy | proposed | — |
+| 2026-10-23 | ADR-0003 | Docker image on Render, CI-gated deploy | superseded for hosting by ADR-0004; Docker image retained | engineering |
+| 2026-10-23 | ADR-0004 | Deploy on Vercel | accepted (owner asked for Vercel) | owner |
+| 2026-10-23 | D-04 | Allow optional user-entered monthly rent override in P0 | proposed | — |
+| 2026-10-23 | D-01 | Provider ships disabled by default; manual entry (FR-22) is P0 | implemented, proposed | — |
 
 ### Document roles
 
@@ -642,7 +653,7 @@ Maintained with `plan.md`. A requirement with no task is either deferred (P1/P2)
 | FR-22 | 3.1 (P0 if provider denied) | Manual-entry route tests |
 | OPS-01 | D3, D7 | CI required on `main` |
 | OPS-02 | D4 | Image builds in CI; container smoke |
-| OPS-03, OPS-04 | D4, D8 | Render deploy gated on checks; smoke workflow |
+| OPS-03, OPS-04 | D4, D8 | Vercel production deploy from `main` after checks; smoke workflow |
 | OPS-05 | D9 | Rollback rehearsal recorded |
 | OPS-06 | D1 | `.env.example` lists all variables |
 | OPS-07 | 1.9 | Log-content test |

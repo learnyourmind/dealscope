@@ -1,6 +1,6 @@
 # ADR-0003: Deploy as a Docker image on Render, gated by CI
 
-- **Status:** Proposed — the hosting choice is reversible and awaits owner confirmation
+- **Status:** Superseded by [ADR-0004](./0004-deploy-on-vercel.md) for hosting. The Docker image and its CI build/smoke job are retained for portability.
 - **Date:** 2026-10-23
 
 ## Context

@@ -1,32 +1,25 @@
-"""Baseline route tests for the current app. No network access.
+"""Route smoke tests. No network access."""
 
-Behavior-pinning tests for known-bad behavior (BD-04) are deliberately avoided;
-add real contract tests with plan.md task 1.1/1.8.
-"""
-
-import pytest
+import requests
 
 import app as app_module
+from tests.conftest import make_client
 
 
-@pytest.fixture()
-def client():
-    app_module.app.config["TESTING"] = True
-    return app_module.app.test_client()
-
-
-def test_index_renders(client):
+def test_index_renders_form(client):
     resp = client.get("/")
     assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "<form" in html and "Analyze property" in html
+    assert "Not advice" in html
 
 
-def test_healthz_is_ok_and_reports_version(client, monkeypatch):
-    monkeypatch.setenv("APP_VERSION", "abc1234")
-
+def test_healthz_is_ok_reports_version_and_never_calls_network(monkeypatch):
     def _no_network(*args, **kwargs):
-        raise AssertionError("/healthz must not call the property provider")
+        raise AssertionError("/healthz must not touch the network")
 
-    monkeypatch.setattr(app_module.analyzer.rf.s, "get", _no_network)
+    monkeypatch.setattr(requests.Session, "request", _no_network)
+    client = make_client(app_version="abc1234")
 
     resp = client.get("/healthz")
 
@@ -34,13 +27,5 @@ def test_healthz_is_ok_and_reports_version(client, monkeypatch):
     assert resp.get_json() == {"status": "ok", "version": "abc1234"}
 
 
-def test_analyze_rejects_non_json_body(client):
-    resp = client.post("/analyze", data="not json", content_type="text/plain")
-    assert resp.status_code >= 400
-    assert resp.get_json()["success"] is False
-
-
-def test_analyze_rejects_missing_address(client):
-    resp = client.post("/analyze", json={})
-    assert resp.status_code >= 400
-    assert resp.get_json()["success"] is False
+def test_module_level_app_exists_for_gunicorn():
+    assert app_module.app.url_map.bind("localhost").match("/healthz")[0] == "healthz"

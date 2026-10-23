@@ -1,15 +1,17 @@
 @echo off
+cd /d "%~dp0"
 echo.
-echo   DealScope -- Real Estate Investment Analyzer
-echo   =============================================
-echo   Zero API keys required
+echo   DealScope -- first-pass rental property analysis
+echo   ================================================
 echo.
-echo   Installing dependencies...
-pip install flask flask-cors requests --quiet
-echo.
-echo   Starting server...
+if not exist .venv (
+    echo   Creating virtual environment...
+    python -m venv .venv
+)
+echo   Installing dependencies from requirements.txt...
+.venv\Scripts\pip install --quiet -r requirements.txt
 echo.
 echo   Open your browser at: http://localhost:5000
 echo.
-python app.py
+.venv\Scripts\python app.py
 pause
