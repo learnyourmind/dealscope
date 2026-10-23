@@ -237,3 +237,13 @@ def test_geocoder_failure_still_fails_even_if_homes_would_work(market):
     homes = FakeHomes(home_record())
     resp = post(make_client(market, FakeGeocoder(error=ProviderTimeout()), homes), BODY)
     assert resp.status_code == 504 and homes.calls == []  # no quota spent without a matched address
+
+
+def test_home_access_denied_degrades_with_a_generic_note_not_config_details(market):
+    from dealscope.errors import ProviderAccessDenied
+
+    resp = post(make_client(market, homes=FakeHomes(error=ProviderAccessDenied())), BODY)
+    a = resp.get_json()["analysis"]
+    reason = a["home"]["configuration"]["beds"]["reason"]
+    assert resp.status_code == 200 and "could not be used right now" in reason
+    assert "key" not in reason.lower() and "plan" not in reason.lower() and "quota" not in reason
