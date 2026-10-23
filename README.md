@@ -19,6 +19,24 @@ pip install flask flask-cors requests
 python app.py
 ```
 
+## Project Status
+
+> The feature lists below describe the **product goal**. The shipped code is smaller: `POST /analyze` returns a basic estimate (property basics, P&I, estimated rent, cash flow, cap rate, a simple verdict), `GET /healthz` reports liveness, and the web page is still a placeholder. See [`intent.md`](./intent.md) for product intent, [`spec.md`](./spec.md) for requirements and known defects, and [`plan.md`](./plan.md) for the roadmap. Numbers from the current build are estimates built on state-level averages and fallback values — not verified property facts.
+
+## Development
+
+```bash
+make install   # one-time: .venv + dependencies
+make check     # lint, format check, tests with coverage gate
+make run       # dev server on http://localhost:5000
+```
+
+Contributing with an AI agent? Read [`docs/ai-sdlc.md`](./docs/ai-sdlc.md) and [`AGENTS.md`](./AGENTS.md).
+
+## Deployment
+
+CI (`.github/workflows/ci.yml`) runs on every pull request. The service is deployed to [Render](https://render.com) from the `Dockerfile` using `render.yaml`, and only after CI passes on `main`. Setup, release, and rollback steps are in [`docs/runbook.md`](./docs/runbook.md). Configuration variables are listed in [`.env.example`](./.env.example). Production uses Gunicorn behind the host's HTTPS; do not expose the Flask development server.
+
 ## How It Works
 - **Data Engine**: Redfin's public (unofficial) API — no auth required
 - **Rental Estimates**: 3-method weighted average (rent-to-price ratio, $/sqft, bedroom benchmarks)

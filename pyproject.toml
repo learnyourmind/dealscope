@@ -1,0 +1,30 @@
+[project]
+name = "dealscope"
+version = "0.1.0"
+description = "First-pass US residential rental-property analysis"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --cov-fail-under is a ratchet: set just below the measured baseline (46% at adoption); raise it as tests land (spec §5.5 targets 80%).
+addopts = "-ra --strict-markers --cov=. --cov-report=term-missing:skip-covered --cov-fail-under=40"
+
+[tool.coverage.run]
+omit = ["tests/*", ".venv/*", "venv/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = [".venv", "venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy single-file implementation. Remove these ignores as app.py is
+# decomposed into the dealscope/ package (plan.md tasks 1.1-1.8).
+"app.py" = ["E401", "E501", "E701", "E722", "F401", "I001", "W291", "W292", "W293"]
+
+[tool.ruff.format]
+# app.py is reformatted when it is decomposed; avoid a noisy whole-file diff now.
+exclude = ["app.py"]

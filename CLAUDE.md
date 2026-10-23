@@ -6,15 +6,31 @@ DealScope is a Python/Flask web app intended to help US residential real-estate 
 
 Keep this guide and [intent.md](./intent.md) in view when working on the project. `CLAUDE.md` describes the repository and engineering practices; `intent.md` describes the product goal and how to assess proposed features.
 
+## Document hierarchy (read in this order)
+
+1. [intent.md](./intent.md) — why: product purpose, principles, acceptance criteria.
+2. [spec.md](./spec.md) — what and how: requirements (`FR-`, `OPS-`), known defects (`BD-`), formulas, API, design, decision log.
+3. [plan.md](./plan.md) — in what order: phased tasks with status and a "Done when" check each.
+4. [docs/ai-sdlc.md](./docs/ai-sdlc.md) — the task loop, human gates, and guardrails for AI agents. Slash commands: `/next-task`, `/verify`, `/spec-sync`; reviewer subagent: `spec-reviewer` (all in `.claude/`).
+
+If the spec is silent or contradictory, do not invent behavior: record an open question and stop. Product defaults in spec §11.1 are *proposed* until the decision log says approved.
+
 ## Repository map
 
-- `app.py` — Flask application, embedded HTML template, Redfin data access, regional assumptions, and the current financial analysis.
+- `app.py` — Flask application, embedded HTML template, Redfin data access, regional assumptions, and the current financial analysis. Also serves `GET /healthz`.
 - `README.md` — setup instructions, documented analysis features, and limitations.
-- `requirements.txt` — Python runtime dependencies.
+- `requirements.txt` / `requirements-dev.txt` — runtime and development (pytest, ruff, pip-audit) dependencies.
 - `run.sh` / `run.bat` — local startup scripts for macOS/Linux and Windows.
-- `Procfile` — Gunicorn web process definition for deployment platforms.
+- `Procfile` — Gunicorn web process definition for Procfile-based platforms.
+- `Dockerfile`, `render.yaml` — production image and Render blueprint (see [ADR-0003](./docs/adr/0003-docker-on-render-with-ci-gated-deploys.md)).
+- `pyproject.toml`, `Makefile` — ruff/pytest/coverage configuration and the `make` entry points below.
+- `tests/` — pytest suite (route smoke tests; independent check of the spec's golden calculation vectors in `tests/fixtures/golden_vectors.json`).
+- `.github/` — CI (`ci.yml`), post-deploy smoke workflow, Dependabot, PR and task templates.
+- `docs/` — `ai-sdlc.md`, `runbook.md` (deploy, rollback), `adr/` (architecture decisions).
+- `scripts/smoke.sh` — post-deploy check (`/healthz` and `/` must return 200).
+- `.env.example` — every configuration variable (no secrets today).
 
-There is currently no separate frontend, test suite, database, or application configuration module. Do not assume these exist.
+There is currently no separate frontend, database, or application configuration module (the spec's `dealscope/` package is planned, not present). Do not assume these exist.
 
 ## Implemented baseline and documentation gap
 
@@ -62,13 +78,22 @@ python app.py
 
 The development server uses `PORT` when set and otherwise listens on port `5000`. `bash run.sh` and `run.bat` are the platform startup scripts. Deployment uses the `web: gunicorn app:app` command in `Procfile`.
 
-No test command is currently defined. For a basic syntax check, run:
+Development workflow (creates `.venv` on first run):
 
 ```bash
-python -m py_compile app.py
+make install   # venv + runtime and dev dependencies
+make check     # ruff lint + format check, pytest with coverage gate, py_compile — what CI runs
+make audit     # pip-audit on requirements.txt
 ```
 
-Add a repeatable test command when tests are added, and document it here and in the README.
+`make test` runs only pytest. The coverage gate in `pyproject.toml` is a ratchet: raise it when coverage rises, never lower it to get a change through. Tests must not touch the network.
+
+Build and smoke-test the production image (needs Docker):
+
+```bash
+make docker
+make smoke URL=https://your-service.onrender.com
+```
 
 ## Definition of done
 

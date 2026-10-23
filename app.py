@@ -114,6 +114,11 @@ analyzer = PropertyAnalyzer()
 @app.route("/")
 def index(): return render_template_string(HTML)
 
+@app.route("/healthz")
+def healthz():
+    # Liveness only (spec FR-21): must never call the upstream provider.
+    return jsonify({"status": "ok", "version": os.environ.get("APP_VERSION", "dev")})
+
 @app.route("/analyze", methods=["POST"])
 def analyze_route():
     try:
