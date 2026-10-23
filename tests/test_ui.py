@@ -113,3 +113,9 @@ def test_parse_rate():
     assert parse_rate("20/minute") == (20, 60)
     assert parse_rate("5 / hour") == (5, 3600)
     assert parse_rate("") is None and parse_rate("lots") is None
+
+
+def test_scrollable_table_wrapper_is_keyboard_focusable(client):
+    # axe "scrollable-region-focusable": an overflow container needs a tab stop and a name.
+    html = client.post("/", data=FORM).get_data(as_text=True)
+    assert 'class="tablewrap" tabindex="0" role="region" aria-label=' in html
