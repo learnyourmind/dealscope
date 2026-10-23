@@ -10,9 +10,9 @@
 
 ## 1. Executive summary
 
-DealScope lets a prospective residential property investor type a US address and see, for that area, the rent homes typically earn and the **highest purchase price at which that rent still covers mortgage, property tax and insurance (PITI) — and, separately, meets a monthly cash-flow goal after vacancy, management and maintenance**. Results are shown for a typical home and for 1–4 bedrooms, with the monthly math behind every price.
+DealScope lets a prospective residential property investor type a US address and see, for that area, the rent homes typically earn and the **highest purchase price at which that rent still covers mortgage, property tax and insurance (PITI) — and, separately, meets a monthly cash-flow goal after vacancy, management and maintenance**. The home is analyzed as **one whole rental unit, never room by room**: one rent, one price, one set of monthly costs, with the math behind every price.
 
-The address is the only required input. Rent and typical home value come from free public data (Zillow Research ZIP indexes), the address is matched with the US Census Geocoder, and tax/insurance use labeled state averages unless the user enters rates. No property-level facts (price, bedrooms, size) are asked for or retrieved. Every reported number is traceable to a source or a stated assumption; missing data never silently becomes a successful-looking result.
+The address is the only required input. Rent and typical home value come from free public data (Zillow Research ZIP indexes), the address is matched with the US Census Geocoder, and tax/insurance use labeled state averages unless the user enters rates. No home-level facts (price, bedrooms, bathrooms, size) are asked for. The home's configuration and own rent come from a permitted property-data API when a key is configured (FR-23); otherwise the result describes a typical home in the ZIP and says so. Every reported number is traceable to a source or a stated assumption; missing data never silently becomes a successful-looking result.
 
 This is an informational decision-support product. Prices are the output of the user's stated criteria, not appraisals, forecasts, or personalized financial advice.
 
@@ -66,7 +66,7 @@ Found by reading `app.py` (version control history shows an earlier 1,300-line `
 - Guaranteed accuracy, predicted returns, or a guarantee that a property is a good investment.
 - User accounts, saved portfolios, sharing, multi-property workflows, or persistent personal data.
 - AI-generated investment recommendations. Do not add an LLM dependency or send property/user data to an AI provider as part of this specification.
-- Retrieving property-level facts (list price, bedrooms, square footage, assessor records): no free licensed national source exists. Do not scrape listing sites.
+- Scraping listing sites (including Zillow listing pages) or using unofficial or unlicensed endpoints to obtain home-level facts. A permitted source is tracked as FR-23.
 - Native mobile applications. The responsive web experience is the initial target.
 
 ## 4. Target users and primary journey
@@ -82,7 +82,7 @@ An individual investor deciding where to look for a rental property in the US.
 3. The system matches it with the Census Geocoder; if several addresses match, the user picks one (nothing is analyzed from an arbitrary first result).
 4. The system looks up the ZIP's typical rent and typical home value and shows their source and as-of date.
 5. The user may adjust financing (down payment, rate, term), the monthly cash-flow goal, a rent adjustment, tax and insurance rates, and HOA.
-6. The result shows, for a typical home and for 1–4 bedrooms: estimated rent, **PITI break-even price**, **all-in break-even price**, and **target price**, plus the monthly math at the target price and how it compares with typical home values.
+6. The result shows, for one whole home (a typical home in the ZIP until its configuration can be identified): estimated rent, **PITI break-even price**, **all-in break-even price**, and **target price**, plus the monthly math at the target price and how it compares with typical home values.
 7. The user inspects assumptions, sources, and limitations before deciding whether to investigate further.
 
 On an upstream failure, unmatched address, or ZIP without data, the user receives a clear, retryable (where applicable) error and keeps their entries.
@@ -100,7 +100,7 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | FR-03 | P0 | Resolve the address with a geocoder behind a replaceable boundary. No match ⇒ not found; several matches ⇒ user selection (never silently take the first). |
 | FR-04 | P0 | Retrieve area data for the matched ZIP (typical rent, typical home value) and track source, as-of date, and kind (retrieved vs estimate vs user vs unavailable) for every value. |
 | FR-05 | P0 | Provide optional assumption inputs (down payment %, annual rate %, loan term, monthly cash-flow goal, rent adjustment %, property-tax rate, insurance rate, HOA) with visible defaults. Preserve submitted values through validation and upstream errors. |
-| FR-06 | P0 | For a typical home and each of 1–4 bedrooms, calculate and display rent and three purchase prices — PITI break-even, all-in break-even, target (meets the cash-flow goal) — plus, at the target price, monthly P&I, tax, insurance, PITI total, other costs, cash flow, cap rate, and cash-on-cash return. A value is shown only when its inputs exist; an unreachable target is shown as such, never as $0. |
+| FR-06 | P0 | For one whole home (never room by room), calculate and display rent and three purchase prices — PITI break-even, all-in break-even, target (meets the cash-flow goal) — plus, at the target price, monthly P&I, tax, insurance, PITI total, other costs, cash flow, cap rate, and cash-on-cash return. A value is shown only when its inputs exist; an unreachable target is shown as such, never as $0. The home's configuration (bedrooms, baths, size) is reported as `not_identified` unless a permitted source supplies it; it is never guessed. |
 | FR-07 | P0 | Show PITI separately from other ownership costs (vacancy, management, maintenance reserve, HOA). Principal and interest are never part of NOI or cap rate. |
 | FR-08 | P0 | Explain each estimate and financial metric through visible labels, a concise methodology explanation, and an assumptions/source detail area. Include units and time period. |
 | FR-09 | P0 | Mark unavailable data as unavailable. Do not substitute invented values, a default state, or a default ZIP. Unknown HOA is counted as $0 but flagged on every price. |
@@ -108,7 +108,7 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | FR-11 | P0 | Prices are presented as calculations from the user's stated criteria ("up to $X keeps cash flow ≥ $Y"), with the formula inputs visible. No BUY/PASS verdict, score, or imperative wording. Wording changes need product/legal review. |
 | FR-12 | P0 | State clearly that estimates are for informational purposes, not professional financial, tax, legal, insurance, appraisal, or lending advice. Encourage local verification. |
 | FR-13 | P0 | Update README setup and feature descriptions when the usable interface or analysis output changes. |
-| FR-14 | P1 | Replace the bedroom-scaling heuristic with a permitted bedroom-level rent source and show rent ranges. ZIP-level rent (Zillow ZORI) is delivered in P0. |
+| FR-14 | P1 | Use the identified home's own rent estimate and range instead of the ZIP-typical rent. ZIP-level rent (Zillow ZORI) is delivered in P0. |
 | FR-15 | P1 | Add comparable sales when provider data is available, with dates, distance/context when supplied, and source attribution. Do not describe asking/list prices as verified sale prices unless provider fields confirm that meaning. |
 | FR-16 | P1 | Add market snapshot and price-history displays only when data, definitions, time coverage, and provenance are available. |
 | FR-17 | P1 | Extend the buy box beyond cash flow (minimum cap rate, cash-on-cash, maximum price vs value). The cash-flow-goal price solver is delivered in P0 via FR-06/FR-11. |
@@ -117,6 +117,7 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | FR-20 | P2 | Add risk/opportunity summaries based on traceable data or explicit rules. No unsupported “expert” claims. |
 | FR-21 | P0 | Expose `GET /healthz` returning `200 {"status":"ok","version":"<app version>"}` without calling any upstream provider, for deployment health checks (see OPS-04). |
 | FR-22 | — | Withdrawn; regression test that `property` input is rejected |
+| FR-23 | P1 | Identify the home's configuration (bedrooms, bathrooms, size, property type) and its own rent estimate from a **permitted** source and calculate prices for that specific home as one unit. Implemented with a RentCast adapter enabled only when `RENTCAST_API_KEY` is set (one request per analysis; free plan = 50/month). Any lookup failure, quota exhaustion, or missing record degrades visibly to the ZIP-typical home with the reason; it never fails the analysis and never guesses. Scraping Zillow or other listing pages is not permitted. |
 
 ### 5.2 Data and calculation requirements
 
@@ -171,7 +172,7 @@ Enforced server-side (FR-02); the UI mirrors them for convenience but is never t
 | Address, ZIP, state, county | US Census Bureau Geocoder (`geocoding.geo.census.gov`, benchmark `Public_AR_Current`), free, no key | retrieved |
 | Typical rent (ZIP) | Zillow Observed Rent Index, all homes + multifamily, smoothed, latest month, from the bundled snapshot `data/zip_market.json` (rebuilt by `scripts/update_market_data.py`) | retrieved (estimate when the user applies a rent adjustment) |
 | Typical home value (ZIP) | Zillow Home Value Index, single-family + condo, middle tier, same snapshot | retrieved |
-| Rent by bedroom count | Typical rent × heuristic factor (1BR 0.67, 2BR 0.87, 3BR 1.13, 4BR 1.41; derived from prototype benchmark rents) | estimate, low confidence |
+| Home configuration (beds, baths, size, type, year built) and the home's own rent estimate | RentCast long-term rent estimate for the Census-standardized address (`GET /v1/avm/rent/long-term`, header `X-Api-Key`), one request per analysis; fields `rent`, `rentRangeLow`, `rentRangeHigh`, `subjectProperty.{bedrooms,bathrooms,squareFootage,propertyType,yearBuilt}`. Used only when `RENTCAST_API_KEY` is set. Otherwise or on failure: `not_identified` with a reason and the ZIP-typical rent | retrieved / unavailable |
 | Property tax, insurance | State-average tables (prototype constants, **unverified**), or user-entered rates; DC/territories have no table and require entered rates | estimate, low confidence / user |
 | Vacancy | 5% of gross monthly rent | estimate |
 | Management | 8% of gross monthly rent | estimate |
@@ -219,7 +220,7 @@ income       = R                      (PITI break-even)
 P_max        = (income − HOA − F) / cost per $P        ⇒ none if the numerator ≤ 0
 ```
 
-Three prices per scenario: **PITI break-even** (no vacancy/management/capex; F = 0), **all-in break-even** (all costs; F = 0), **target** (all costs; F = the user's goal). Prices are floored to the nearest $1,000 so they never overstate what the assumptions support; a price below $1,000 is reported as unreachable. Tests must round-trip: cash flow at the unrounded price equals F, and ordering `PITI ≥ all-in ≥ target` holds when F ≥ 0. The golden `price_vectors` in `tests/fixtures/golden_vectors.json` fix the numbers.
+Three prices for the home: **PITI break-even** (no vacancy/management/capex; F = 0), **all-in break-even** (all costs; F = 0), **target** (all costs; F = the user's goal). Prices are floored to the nearest $1,000 so they never overstate what the assumptions support; a price below $1,000 is reported as unreachable. Tests must round-trip: cash flow at the unrounded price equals F, and ordering `PITI ≥ all-in ≥ target` holds when F ≥ 0. The golden `price_vectors` in `tests/fixtures/golden_vectors.json` fix the numbers.
 
 #### Recommendation policy
 
@@ -263,13 +264,14 @@ The current endpoint is `POST /analyze`; the following contract is a target, not
     "location": {"address": {"value": "1100 CONGRESS AVE, AUSTIN, TX, 78701", "kind": "retrieved", "source": "US Census Bureau Geocoder"}, "zip": "78701", "state": "TX", "county": "Travis County"},
     "market": {"zip": "78701", "typical_rent": {"value": 3177, "unit": "USD/month", "kind": "retrieved", "source": "Zillow Observed Rent Index (ZORI), ZIP 78701, 2026-09"}, "typical_home_value": {"value": 650693, "unit": "USD", "kind": "retrieved", "source": "…"}},
     "assumptions": {"…": "each {value, unit, kind, basis|source}"},
-    "scenarios": [
-      {"key": "typical", "label": "Typical home in this ZIP", "beds": null,
-       "rent": {"value": 3177, "kind": "retrieved"},
-       "prices": {"piti_breakeven": {"value": 398000, "kind": "estimate"}, "allin_breakeven": {"value": 313000, "kind": "estimate"}, "target": {"value": 302000, "kind": "estimate"}},
-       "monthly_at_price": {"target": {"principal_interest": 1607.37, "property_tax": 410.22, "insurance": 390.08, "piti_total": 2407.67, "cash_flow": 104.65}},
-       "at_target": {"cap_rate_pct": 6.8, "cash_on_cash_pct": 2.08, "pct_of_zip_home_value": 46}}
-    ],
+    "home": {
+      "label": "Typical home in this ZIP",
+      "configuration": {"status": "not_identified", "beds": {"kind": "unavailable", "reason": "…"}, "baths": {"kind": "unavailable"}, "sqft": {"kind": "unavailable"}, "note": "Calculated as a single whole-home unit…"},
+      "rent": {"value": 3177, "kind": "retrieved"},
+      "prices": {"piti_breakeven": {"value": 398000, "kind": "estimate"}, "allin_breakeven": {"value": 313000, "kind": "estimate"}, "target": {"value": 302000, "kind": "estimate"}},
+      "monthly_at_price": {"target": {"principal_interest": 1607.37, "property_tax": 410.22, "insurance": 390.08, "piti_total": 2407.67, "cash_flow": 104.65}},
+      "at_target": {"cap_rate_pct": 6.8, "cash_on_cash_pct": 2.08, "pct_of_zip_home_value": 46}
+    },
     "qualifier": {"qualified": true, "note": "HOA is unknown …"},
     "limitations": ["…"],
     "sources": [{"name": "…", "url": "…", "used_for": "…"}],
@@ -278,7 +280,7 @@ The current endpoint is `POST /analyze`; the following contract is a target, not
 }
 ```
 
-Scenario keys are `typical`, `1br`, `2br`, `3br`, `4br`. An unreachable price is `{"kind": "unavailable", "reason": "…"}` with no `value`. The shape is the implemented contract; additive changes are non-breaking.
+There is exactly one `home` object (no per-room or per-bedroom scenarios). An unreachable price is `{"kind": "unavailable", "reason": "…"}` with no `value`. The shape is the implemented contract; additive changes are non-breaking.
 
 #### Error response
 
@@ -430,9 +432,10 @@ Vendor responses are normalized at the boundary. Calculations operate on typed v
 | `app.py` | `create_app()` factory plus module-level `app` (Gunicorn, Vercel); routes `/`, `/analyze`, `/healthz`; error handlers; request-ID, logging, rate-limit, CORS | Contain calculations or vendor parsing |
 | `dealscope/validation.py` | Parse and validate the request into `AnalysisRequest`; reject unknown fields | Touch the network |
 | `dealscope/provider.py` | `Geocoder` interface + `CensusGeocoder` (timeouts, status checks, size cap, error mapping) and `DisabledGeocoder`; `MarketData` reading the bundled ZIP snapshot | Return vendor JSON or apply defaults |
-| `dealscope/analysis.py` | Pure functions: mortgage payment, `compute_financials`, `max_purchase_price`, `floor_price`, `monthly_view`; `build_analysis` assembles scenarios with provenance | Perform I/O |
-| `dealscope/assumptions.py` | State tax/insurance tables, bedroom factors, default rates (each labeled low-confidence) | Be imported by the provider layer |
+| `dealscope/analysis.py` | Pure functions: mortgage payment, `compute_financials`, `max_purchase_price`, `floor_price`, `monthly_view`; `build_analysis` assembles the single `home` result with provenance | Perform I/O |
+| `dealscope/assumptions.py` | State tax/insurance tables, default rates (each labeled low-confidence) | Be imported by the provider layer |
 | `dealscope/service.py` | Orchestrates geocode → market lookup → analysis; raises domain errors | Format output |
+| `dealscope/homes.py` | `HomeRecords` interface, `RentCastHomes` adapter (one bounded request, safe error mapping, key never logged or in `repr`), `build_homes` | Fail the analysis on a lookup error or guess a field |
 | `dealscope/errors.py`, `config.py`, `ratelimit.py`, `forms.py` | Safe error mapping; env config; in-process limiter; form → payload | Include exception text in messages |
 | `data/zip_market.json`, `scripts/update_market_data.py` | Bundled Zillow Research ZIP snapshot (rent, home value, as-of dates) and its rebuild script | Be edited by hand |
 | `templates/`, `static/` | Accessible UI (§5.4), no third-party requests, works without JavaScript | Compute financial values client-side |
@@ -456,12 +459,13 @@ Every value in `analysis.property`, `analysis.assumptions`, and `analysis.metric
 | `APP_ENV` | `development` | `production` disables debug-only behavior |
 | `CORS_ORIGINS` | empty (CORS off) | Comma-separated allowed origins; empty means same-origin only |
 | `GEOCODER` | `census` | `census` (default) or `disabled` (turns address lookup off) |
+| `RENTCAST_API_KEY` | empty (feature off) | **Secret.** Host-managed (Vercel Sensitive variable). Enables home-record and rent lookup. Never commit, log, or show it |
 | `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_READ_TIMEOUT_S` | `3` / `8` | §5.5 (Census Geocoder calls) |
 | `RATE_LIMIT` | `20/minute` | §5.5; empty disables (use only behind an edge limiter) |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
 | `APP_VERSION` | `dev` | Injected at build time (git SHA); returned by `/healthz` |
 
-No variable holds a secret. Any future keyed source (for example a free Census ACS key for county-level data) is added as a host-managed secret, never in the repository.
+Only `RENTCAST_API_KEY` is a secret. Any further keyed source (for example a free Census ACS key for county-level data) is added as a host-managed secret, never in the repository.
 
 ### 6.4 Deployment architecture
 
@@ -510,9 +514,10 @@ Data sources in use and their status (owner direction 2026-10-23: free public so
 |---|---|---|
 | US Census Bureau Geocoder | Address → ZIP, state, county | US government data; free, no key. Be a polite client (timeouts, no bulk use). |
 | Zillow Research ZORI / ZHVI (public CSV downloads) | ZIP-level rent and home value, bundled as a snapshot | Published by Zillow Research for public use with attribution (shown in the app and in `sources`). **Release gate:** confirm the current terms for this deployment's use before wide public promotion or any commercial use. |
+| RentCast API (free Developer plan) | Home configuration and the home's own rent estimate | Keyed, licensed API; free plan = 50 requests/month, overage $0.20/request on that plan (cap or disable overage in the RentCast account). **Release gate:** read RentCast's terms (terms-api) for public display and caching before enabling the key in production. The address is sent to RentCast; the app discloses it. |
 | State tax/insurance tables | Estimates | Prototype constants of unknown provenance; labeled unverified. Replace with sourced data. |
 
-Not used, deliberately: Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
+Not used, deliberately: Zillow listing pages and APIs (scraping is not permitted; official access needs an approved application), Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
 
 ### Financial-content concern
 
@@ -572,7 +577,7 @@ The intent includes “recommendations,” target/max/walk-away prices, and “e
 Initial release is acceptable when:
 
 1. The root page is a functional, responsive, keyboard-accessible interface whose only required input is an address.
-2. A valid address and valid assumptions produce rent and three prices (PITI break-even, all-in break-even, target) for a typical home and 1–4 bedrooms when area data exists.
+2. A valid address and valid assumptions produce rent and three prices (PITI break-even, all-in break-even, target) for one whole home (a typical home in the ZIP) when area data exists.
 3. Ambiguous addresses require user selection; no arbitrary first candidate is silently analyzed.
 4. A missing ZIP, ZIP without rent data, or geocoder failure produces an explicit error (or `needs_rates` request) and never a fabricated rent or default state.
 5. Each result value identifies whether it is public data, user-supplied, or estimated, and shows a source/as-of date or basis.
@@ -627,9 +632,9 @@ Engineering may build to these without waiting. If the owner chooses differently
 | ID | Answers §11 | Proposed default | Rationale / what would change it |
 |---|---|---|---|
 | D-01 | #1 provider | **Revised 2026-10-23:** US Census Geocoder (address matching) + bundled Zillow Research ZIP snapshot (rent, home value); no Redfin, no scraping | Approved direction; Zillow terms gate in §7 |
-| D-02 | #2 scope | US addresses; area-level analysis for a typical home and 1–4 bedrooms (property type not determined) | Owner: address-only input |
+| D-02 | #2 scope | US addresses; one whole-home unit (a typical home in the ZIP until the configuration can be identified); never room by room | Owner direction 2026-10-23 |
 | D-03 | #3 data quality | Rent and home value are ZIP-level public data with as-of dates; tax and insurance are labeled low-confidence state averages unless entered; unknown HOA is flagged | FR-09 |
-| D-04 | #4 rent source | ZIP typical rent from Zillow ZORI; bedroom rows via a disclosed heuristic; optional user rent adjustment % | Replace heuristic with a permitted bedroom-level source (FR-14) |
+| D-04 | #4 rent source | ZIP typical rent from Zillow ZORI for the whole home; optional user rent adjustment %; the bedroom heuristic was removed | Home-specific rent once FR-23 has a source |
 | D-05 | #5 financing | Default 20% down, 7.0% rate, 30-year term; user can change down payment and rate in P0; term selectable (15/20/30) in the API from P0 and in the UI from P1 | Bounds in §5.2 |
 | D-06 | #6 cash invested | Down payment only; stated beside cash-on-cash | Add optional closing costs later |
 | D-07 | #7 buy box | **Revised 2026-10-23:** prices computed from the user's cash-flow goal (default $100/mo placeholder) with PITI break-even and all-in break-even reference prices; no BUY/PASS verdicts | Wording needs product/legal review (FR-11) |
@@ -655,6 +660,8 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | P0-1 | Owner first chose to enable the Redfin adapter, then directed address-only input from free public sources. Redfin adapter removed; Census + Zillow Research used (ADR-0005) | superseded by direction change | owner (chat) |
 | 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
 | 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
+| 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic | approved | owner (chat) |
+| 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; adapter built, key to be supplied by the owner | approved; key pending | owner (chat) |
 
 ### Document roles
 

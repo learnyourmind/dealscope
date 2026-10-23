@@ -37,12 +37,12 @@ There is no database, cache, or separate frontend build. Do not assume these exi
 Shipped (see `plan.md` for status; direction per ADR-0005):
 
 - `app.py` — `create_app()` factory (module-level `app` for Gunicorn/Vercel): `GET/POST /` (server-rendered page), `POST /analyze` (JSON API), `GET /healthz`; error envelope, request IDs, structured logging without addresses, optional CORS, per-process rate limit.
-- `dealscope/` — `validation.py` (bounds; address is the only required input), `provider.py` (Census Geocoder + bundled ZIP market data), `analysis.py` (financials, closed-form price solver, provenance), `assumptions.py` (state tax/insurance tables, bedroom factors), `service.py`, `errors.py`, `config.py`, `ratelimit.py`, `forms.py`.
+- `dealscope/` — `validation.py` (bounds; address is the only required input), `provider.py` (Census Geocoder + bundled ZIP market data + shared bounded HTTP helper), `homes.py` (RentCast home record and rent estimate, enabled only with `RENTCAST_API_KEY`), `analysis.py` (financials, closed-form price solver, provenance), `assumptions.py` (state tax/insurance tables, default rates), `service.py`, `errors.py`, `config.py`, `ratelimit.py`, `forms.py`.
 - `data/zip_market.json` — Zillow Research ZIP rent/home-value snapshot, rebuilt by `scripts/update_market_data.py` (never hand-edit).
 - `templates/index.html`, `static/` — dark/light, no-JS-required UI; no third-party requests.
 - Every value is classified `retrieved | user | estimate | unavailable`. No BUY/PASS verdicts: prices are calculations from the user's criteria.
 
-Not shipped: property-level facts (no free licensed source), comps, price history, projections, scores, county-level tax. Tax and insurance use unverified state-average constants; bedroom rents use a heuristic. Manual entry of price/bedrooms and the Redfin adapter were removed (owner direction).
+Not shipped: condition, list price, assessor records, comps, price history, projections, scores, county-level tax. The home is always analyzed as one whole unit, never room by room. With `RENTCAST_API_KEY` the home's configuration and own rent come from RentCast (adapter written from the published API reference, not yet exercised live); without it the unit is a typical home in the ZIP and the configuration shows "not identified". The key is a secret: never log, print, commit, or put it in a fixture. Tax and insurance use unverified state-average constants.
 
 When changing functionality, distinguish clearly between what is implemented and what is aspirational. Update the README whenever the shipped behavior or setup instructions change.
 

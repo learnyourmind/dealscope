@@ -15,17 +15,18 @@ The primary user is an individual investor screening where to look. They want to
 - How that price compares with what homes typically cost in the area.
 - What assumptions, risks, and missing information could change the result.
 
-The central workflow: **enter an address → see local rent and typical home value from public data → optionally adjust financing, cash-flow goal, and cost assumptions → read the price a rental can support (break-even and target) for each bedroom count → decide whether to investigate further.**
+The central workflow: **enter an address → see local rent and typical home value from public data → optionally adjust financing, cash-flow goal, and cost assumptions → read the price the home can support (PITI break-even, all-in break-even, target) → decide whether to investigate further.**
 
 ## Inputs: the address is the only thing the user provides
 
-The only required input is a US address. DealScope must not ask users to type property facts (price, bedrooms, square footage) that the product cannot know or verify. Because no free, licensed, national source of property-level facts exists, the product answers for the area and shows each common bedroom count rather than guessing a property's details. Financing and cost assumptions are optional, have visible defaults, and are tucked behind an "adjust assumptions" control.
+The only required input is a US address. DealScope must not ask users to type property facts (price, bedrooms, square footage) that the product could look up itself. The home is always evaluated **as one whole rental unit — never room by room**: one rent, one purchase price, one set of monthly costs. The product identifies the home's configuration (bedrooms, bathrooms, size, type) from a permitted property-data source (RentCast's free Developer plan, with its key held as a host secret) and uses that home's own rent estimate, so the result is for the specific home as a single unit. When no source is configured, its quota is used up, or no record exists, the configuration is shown as "not identified" with the reason, and the result describes a typical home in the ZIP, still as a single unit. Financing and cost assumptions are optional, have visible defaults, and are tucked behind an "adjust assumptions" control.
 
 ## Data principle: free, public, permitted sources
 
 Use free public data whose terms allow the use, and show attribution and "as of" dates:
 
 - US Census Bureau Geocoder — address matching, ZIP, state, county.
+- RentCast property records and rent estimate (free Developer plan, 50 requests per month; key required) — the home's bedrooms, bathrooms, size, type, and rent estimate, one request per analysis.
 - Zillow Research public indexes (observed rent index and home value index) by ZIP.
 - State-average tax and insurance tables, labeled as low-confidence estimates until replaced by sourced data.
 
@@ -36,11 +37,11 @@ Do not scrape listing sites, use unofficial endpoints without a terms review, or
 Implemented now:
 
 - Address-only search with a clear, modern interface.
-- ZIP-level typical rent and typical home value (public data), bedroom-count scenarios, and three prices per scenario: **PITI break-even**, **all-in break-even**, and **target price** (meets the user's monthly cash-flow goal).
+- One whole-home unit: when the home's record is available, its own configuration and rent estimate; otherwise the ZIP-level typical rent. Typical home value for the ZIP (public data) as context. Three prices: **PITI break-even**, **all-in break-even**, and **target price** (meets the user's monthly cash-flow goal).
 - The monthly math at each price (PITI broken out; other costs; cash flow), plus cap rate and cash-on-cash at the target price.
 - Visible assumptions, sources, and limitations; unknown values shown as unknown.
 
-Planned (goals, not claims): county-level property tax, bedroom-level rent from a permitted source, comparable sales and price history, market snapshot, longer-term scenarios, user-defined buy-box criteria beyond cash flow, and sourced risk and opportunity summaries.
+Planned (goals, not claims): the home's own property tax from county records (an extra request per analysis), the home's own value estimate, county-level tax data, comparable sales and price history, market snapshot, longer-term scenarios, user-defined buy-box criteria beyond cash flow, and sourced risk and opportunity summaries. Zillow listing pages and APIs are not used: scraping is not permitted and their official APIs require an approved application.
 
 ## Product principles
 
@@ -51,7 +52,8 @@ Planned (goals, not claims): county-level property tax, bedroom-level rent from 
 5. **Keep the first-pass workflow approachable.** Ask only for the address; progressively reveal detail without hiding important costs.
 6. **Fail visibly and safely.** An unavailable data source or invalid input must not produce a successful-looking analysis built on fabricated facts.
 7. **Build incrementally.** Deliver cohesive, testable improvements that keep the implemented product and its documentation accurate.
-8. **Recommendations are calculations, not advice.** Prices are what the user's own criteria support. They are not appraisals, forecasts, or personalized investment advice, and the interface says so.
+8. **One home, one unit.** A house is evaluated as a single rental unit with one rent and one price, never room by room.
+9. **Recommendations are calculations, not advice.** Prices are what the user's own criteria support. They are not appraisals, forecasts, or personalized investment advice, and the interface says so.
 
 ## Feature acceptance criteria
 
@@ -67,12 +69,12 @@ For a new or changed analysis feature, check that:
 
 ## Current known limitations
 
-- Rent is a ZIP-level typical rent across all home sizes, not a quote for a specific property; bedroom rows scale it with a rough heuristic. The rent index lags the market by weeks and is smoothed.
+- With a property-data key, rent is an automated estimate for the address (with a range), not a quote. Without a key, when the monthly quota is used up, or when no record exists, rent is the ZIP-level typical rent across homes and the configuration is not identified. The free plan allows only 50 lookups a month.
 - Property tax and insurance use state-average constants carried over from the prototype (unverified) unless the user enters rates. Actual bills vary by county, assessment, and property. DC and territories have no table and require entered rates.
-- Property facts (bedrooms, size, condition, list price) and county assessor records are not retrieved.
+- Condition, list price, and county assessor records are not retrieved. Records can be wrong or missing; multi-unit records give a single-unit rent estimate.
 - Some ZIPs (PO box, institutional, tiny areas) have no rent data and return "insufficient data".
 - Vacancy, management, and maintenance reserve are fixed default assumptions.
-- Address matching uses the Census Geocoder, which can be slow or unavailable; the address is sent to it.
+- Address matching uses the Census Geocoder, which can be slow or unavailable; the address is sent to it, and to RentCast when a key is configured.
 - Analyses are not stored (no database). The built-in rate limit is per process.
 
 These limitations should be addressed explicitly when relevant to a feature; they should not be obscured by more confident UI language.

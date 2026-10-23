@@ -1,7 +1,7 @@
 """Environment-driven configuration (spec §6.3). No setting here is a secret."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 
@@ -25,6 +25,8 @@ class Config:
     rate_limit: str = "20/minute"
     log_level: str = "INFO"
     max_body_bytes: int = 8 * 1024
+    # Host secret. Never log or print it (repr=False keeps it out of tracebacks and logs).
+    rentcast_api_key: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -41,4 +43,5 @@ class Config:
             read_timeout_s=_float("UPSTREAM_READ_TIMEOUT_S", 8.0),
             rate_limit=os.environ.get("RATE_LIMIT", "20/minute"),
             log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+            rentcast_api_key=os.environ.get("RENTCAST_API_KEY", "").strip(),
         )

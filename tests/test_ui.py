@@ -1,6 +1,6 @@
 from dealscope.errors import ProviderTimeout
 from dealscope.ratelimit import RateLimiter, parse_rate
-from tests.conftest import FakeGeocoder, loc, make_client
+from tests.conftest import FakeGeocoder, FakeHomes, home_record, loc, make_client
 
 FORM = {
     "address": "100 Example St, Austin, TX",
@@ -15,7 +15,11 @@ def test_form_post_renders_results_without_javascript(client):
     resp = client.post("/", data=FORM)
     html = resp.get_data(as_text=True)
     assert resp.status_code == 200
-    assert "Up to $" in html and "By bedroom count" in html and "PITI break-even" in html
+    assert (
+        "Up to $" in html and "The numbers for one whole home" in html and "PITI break-even" in html
+    )
+    assert "Nothing is priced room by room" in html and "Home configuration" in html
+    assert "Not identified" in html and "By bedroom" not in html and "1 bedroom" not in html
     assert "Public data" in html and "Estimate" in html  # source type shown for every figure
     assert "Monthly math at the target price" in html and "PITI total" in html
     assert "ZIP 78701" in html and "Zillow" in html and "Census" in html
@@ -119,3 +123,19 @@ def test_scrollable_table_wrapper_is_keyboard_focusable(client):
     # axe "scrollable-region-focusable": an overflow container needs a tab stop and a name.
     html = client.post("/", data=FORM).get_data(as_text=True)
     assert 'class="tablewrap" tabindex="0" role="region" aria-label=' in html
+
+
+def test_identified_home_details_are_shown(market):
+    client = make_client(market, homes=FakeHomes(home_record()))
+    html = client.post("/", data=FORM).get_data(as_text=True)
+    assert (
+        "This home" in html and "1,850 sq ft" in html and "Single Family" in html and "1998" in html
+    )
+    assert "From the property record for this address" in html
+    assert "Not identified" not in html and "RentCast" in html
+
+
+def test_privacy_footer_names_rentcast_only_when_it_is_enabled(market, client):
+    on = make_client(market, homes=FakeHomes(home_record())).get("/").get_data(as_text=True)
+    off = client.get("/").get_data(as_text=True)
+    assert "and to RentCast" in on and "RentCast" not in off

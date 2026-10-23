@@ -65,4 +65,8 @@ Logs are one-line JSON on stdout (Vercel captures them): request id, route, stat
 
 ## Secrets
 
-None today. If a licensed provider is added, store its key as a Vercel environment variable marked Sensitive (never in the repo, logs, or screenshots), rotate on suspected exposure, and add an empty placeholder to `.env.example`.
+`RENTCAST_API_KEY` is the only secret. Store it as a Vercel environment variable marked **Sensitive** (Project → Settings → Environment Variables), never in the repo, logs, screenshots, or chat. Rotate it in the RentCast dashboard if it may have leaked, then update Vercel and redeploy.
+
+**Quota and billing:** the free RentCast plan allows 50 requests a month and charges $0.20 per request beyond that. Each analysis uses one request, and the app's rate limit is per instance, so cap or disable overage billing in the RentCast account and watch its usage page. When the quota is gone the app keeps working and shows the ZIP-typical home with the reason.
+
+To switch the lookup off without changing code, delete the variable and redeploy; the app falls back to the ZIP-typical home.
