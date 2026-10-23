@@ -69,4 +69,13 @@ Logs are one-line JSON on stdout (Vercel captures them): request id, route, stat
 
 **Quota and billing:** the free RentCast plan allows 50 requests a month and charges $0.20 per request beyond that. Each analysis uses one request, and the app's rate limit is per instance, so cap or disable overage billing in the RentCast account and watch its usage page. When the quota is gone the app keeps working and shows the ZIP-typical home with the reason.
 
+### If a secret was committed or pushed
+
+Treat it as compromised the moment it reaches a remote, even on a branch, even if deleted later: this repository is public and GitHub keeps commits reachable by hash.
+
+1. **Rotate first.** Regenerate the key in the provider's dashboard (RentCast → API) so the leaked value stops working.
+2. Put the new key only in the host secret store: `vercel env add RENTCAST_API_KEY production` (paste it at the prompt; choose Sensitive in the dashboard), then redeploy (`vercel redeploy <production-url>`).
+3. Remove the value from the working tree and branches: restore the template (`git checkout origin/main -- .env.example`), delete the leaking branch (`git push origin --delete <branch>`). Rewriting history is optional and does not make the old key safe; rotation does.
+4. `tests/test_repo_hygiene.py` fails CI if `.env.example` has a value for any KEY/SECRET/TOKEN/PASSWORD variable. Real keys never go in tracked files; use the host store or a git-ignored `.env`.
+
 To switch the lookup off without changing code, delete the variable and redeploy; the app falls back to the ZIP-typical home.

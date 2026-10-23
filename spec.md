@@ -661,6 +661,7 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
 | 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
 | 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic | approved | owner (chat) |
+| 2026-10-23 | Incident | The RentCast key was committed to `.env.example` on public branch `feature/single-unit-home` (commit b14a61e; not on `main`). Rotation required; CI guard added (plan 4.12) | open until the key is rotated | owner |
 | 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; adapter built, key to be supplied by the owner | approved; key pending | owner (chat) |
 
 ### Document roles
