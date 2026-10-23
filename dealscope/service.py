@@ -1,5 +1,6 @@
 """Orchestration: validated request → geocode → area market data → analysis (spec §6)."""
 
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -16,6 +17,16 @@ from .errors import (
 from .homes import HomeRecords
 from .provider import Geocoder, MarketData
 from .validation import parse_request
+
+
+def _home_lookup_address(typed: str, standardized: str) -> str:
+    """Address text for the property-data lookup.
+
+    The Census-standardized text can drop a street suffix ("5500 GRAND LAKE" for "...Dr"), which
+    makes a property-record match less likely. If the user's own text already has a ZIP, send
+    that; otherwise send the standardized address, which always carries one.
+    """
+    return typed if re.search(r"\b\d{5}\b", typed) else standardized
 
 
 def _lookup_home(homes: Optional[HomeRecords], address: str, deadline: float):
@@ -65,7 +76,9 @@ def run_analysis(
             f"We don't have rent data for ZIP {location.zip}. Try an address in a nearby ZIP.",
             missing=["rent"],
         )
-    record, note = _lookup_home(homes, location.address, deadline)
+    record, note = _lookup_home(
+        homes, _home_lookup_address(req.address, location.address), deadline
+    )
     return {
         "success": True,
         "analysis": build_analysis(req, location, zip_market, home=record, home_note=note),

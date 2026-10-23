@@ -386,7 +386,15 @@ def build_analysis(
             + (" using this home's own rent estimate." if own_rent else " (typical ZIP rent)."),
         }
     else:
-        why = f"Not identified: {home_note}." if home_note else NOT_IDENTIFIED
+        if home_note:
+            why = f"Not identified: {home_note}."
+        elif home is not None:
+            why = (
+                "Not identified: the property-data source returned a rent estimate but no "
+                "bedroom, bathroom, or size details for this address."
+            )
+        else:
+            why = NOT_IDENTIFIED
         configuration = {
             "status": "not_identified",
             "beds": _unavailable(why, "bedrooms"),

@@ -247,3 +247,27 @@ def test_home_access_denied_degrades_with_a_generic_note_not_config_details(mark
     reason = a["home"]["configuration"]["beds"]["reason"]
     assert resp.status_code == 200 and "could not be used right now" in reason
     assert "key" not in reason.lower() and "plan" not in reason.lower() and "quota" not in reason
+
+
+# ── what address text goes to the property-data source ──────────────────────────────────
+
+
+def test_typed_address_with_a_zip_is_sent_to_the_home_source_as_typed(market):
+    homes = FakeHomes(home_record())
+    post(make_client(market, homes=homes), {"address": "100 Example Dr, Austin, TX 78701"})
+    assert homes.calls == ["100 Example Dr, Austin, TX 78701"]
+
+
+def test_typed_address_without_a_zip_falls_back_to_the_standardized_address(market):
+    homes = FakeHomes(home_record())
+    post(make_client(market, homes=homes), {"address": "100 Example Dr Austin"})
+    assert homes.calls == ["100 EXAMPLE ST, AUSTIN, TX, 78701"]
+
+
+def test_record_with_rent_but_no_details_says_so_instead_of_blaming_configuration(market):
+    rec = home_record(beds=None, baths=None, sqft=None, property_type=None, year_built=None)
+    resp = post(make_client(market, homes=FakeHomes(rec)), BODY)
+    h = resp.get_json()["analysis"]["home"]
+    assert h["label"] == "This home" and h["configuration"]["status"] == "not_identified"
+    assert "no bedroom, bathroom, or size details" in h["configuration"]["beds"]["reason"]
+    assert "no permitted source" not in h["configuration"]["beds"]["reason"]
