@@ -29,3 +29,8 @@ def test_healthz_is_ok_reports_version_and_never_calls_network(monkeypatch):
 
 def test_module_level_app_exists_for_gunicorn():
     assert app_module.app.url_map.bind("localhost").match("/healthz")[0] == "healthz"
+
+
+def test_head_request_to_root_is_not_treated_as_a_submission(client):
+    resp = client.head("/")
+    assert resp.status_code == 200

@@ -164,7 +164,7 @@ def create_app(
 
     @app.route("/", methods=["GET", "POST"])
     def index():
-        if request.method == "GET":
+        if request.method != "POST":  # GET and HEAD
             return _page()
         form = request.form.to_dict()
         try:
