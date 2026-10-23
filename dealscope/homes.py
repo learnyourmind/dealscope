@@ -9,8 +9,9 @@ One request per analysis: the long-term rent estimate returns the subject proper
 and the rent estimate together, which conserves the free plan's 50 requests per month. Lookup
 failures never fail the analysis; the caller falls back to the ZIP-typical home and says why.
 
-The endpoint paths and field names follow RentCast's published API reference
-(developers.rentcast.io). They have not been exercised against the live service in this repo.
+The endpoint path and field names follow RentCast's published API reference
+(developers.rentcast.io) and were confirmed against the live service on 2026-10-23 (the
+`home_record` log line lists the response field names that came back).
 """
 
 import json

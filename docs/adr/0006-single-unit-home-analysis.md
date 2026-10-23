@@ -23,7 +23,7 @@ Zillow's listing pages and consumer APIs are not licensed for this use (scraping
 - The address is also sent to RentCast when enabled; the UI discloses it.
 - The free plan is small (50 requests/month) and a public site can exhaust it; overage on that plan is $0.20 per request unless capped. The owner must cap billing in the RentCast account; the app's per-instance rate limit is not a quota guard.
 - RentCast's terms for public display and caching must be read before production use (release gate in spec §7).
-- Endpoint and field names follow RentCast's published reference and are not yet exercised live.
+- Verified live on 2026-10-23: the long-term rent estimate returns `rent`, `rentRangeLow/High`, `comparables`, and `subjectProperty` (`bedrooms`, `bathrooms`, `squareFootage`, `propertyType`, `yearBuilt`, `lotSize`, `lastSaleDate`, county fields). The address text matters: for one test address, the Census-standardized text (street suffix dropped) returned a rent estimate with no property details, while the address as typed returned the full record. The app therefore sends the typed address when it contains a ZIP.
 
 ## Alternatives considered
 Scraping Zillow (not permitted); asking the user for bedrooms (rejected by the owner's address-only direction); keeping bedroom rows (rejected: reads as renting by room).
