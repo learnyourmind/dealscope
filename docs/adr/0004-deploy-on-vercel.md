@@ -14,6 +14,7 @@ The owner wants the app on Vercel. Vercel's Python runtime serves a Flask WSGI a
 - Releases come from `main`. Connecting the GitHub repository in the Vercel dashboard gives automatic deploys; require the CI checks via branch protection so only green commits reach `main`.
 
 ## Consequences
+- **No `pyproject.toml`.** Vercel installs dependencies from `pyproject.toml` whenever the file exists (even without a `[project]` table), which skipped `requirements.txt` and caused `No module named 'flask'` on the first deploys. Tool config therefore lives in `ruff.toml`, `pytest.ini`, and `.coveragerc`.
 - Serverless: cold starts on idle; no background workers; the in-process rate limiter is per instance (add Vercel Firewall or an edge limiter before heavy public exposure).
 - Function duration limits apply (the app budgets 15 s for upstream calls; check the plan's limit before enabling a slow provider).
 - Rollback is "promote a previous deployment" in Vercel (see `docs/runbook.md`).

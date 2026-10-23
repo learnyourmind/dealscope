@@ -23,7 +23,7 @@ If the spec is silent or contradictory, do not invent behavior: record an open q
 - `run.sh` / `run.bat` — local startup scripts for macOS/Linux and Windows.
 - `Procfile` — Gunicorn web process definition for Procfile-based platforms.
 - `Dockerfile` — portable production image (built and smoke-tested in CI). `.python-version`, `.vercelignore` — Vercel deployment (see [ADR-0004](./docs/adr/0004-deploy-on-vercel.md); Docker kept for portability, see ADR-0003).
-- `pyproject.toml`, `Makefile` — ruff/pytest/coverage configuration and the `make` entry points below.
+- `ruff.toml`, `pytest.ini`, `.coveragerc`, `Makefile` — lint/test/coverage configuration and the `make` entry points below. Do **not** add a `pyproject.toml`: Vercel would install from it and skip `requirements.txt` (ADR-0004).
 - `tests/` — pytest suite (validation, analysis against the golden vectors in `tests/fixtures/golden_vectors.json`, provider adapter with synthetic payloads, API and UI routes). No live network.
 - `.github/` — CI (`ci.yml`), post-deploy smoke workflow, Dependabot, PR and task templates.
 - `docs/` — `ai-sdlc.md`, `runbook.md` (deploy, rollback), `adr/` (architecture decisions).
@@ -87,7 +87,7 @@ make check     # ruff lint + format check, pytest with coverage gate, py_compile
 make audit     # pip-audit on requirements.txt
 ```
 
-`make test` runs only pytest. The coverage gate in `pyproject.toml` is a ratchet: raise it when coverage rises, never lower it to get a change through. Tests must not touch the network.
+`make test` runs only pytest. The coverage gate in `pytest.ini` is a ratchet: raise it when coverage rises, never lower it to get a change through. Tests must not touch the network.
 
 Build and smoke-test the production image (needs Docker):
 

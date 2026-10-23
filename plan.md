@@ -20,10 +20,10 @@ Phase D tooling, Phase 1 (reliable foundation) and Phase 2 (usable UI) are imple
 
 | ID | Task | Satisfies | Depends | Who | Status | Done when |
 |---|---|---|---|---|---|---|
-| D1 | Repo hygiene: `.gitignore`, `pyproject.toml` (ruff, pytest, coverage), `requirements-dev.txt`, `Makefile`, `.env.example` | OPS-06, BD-11 | — | AI | done | `make check` equivalent passes locally |
+| D1 | Repo hygiene: `.gitignore`, `ruff.toml`, `pytest.ini`, `.coveragerc`, `requirements-dev.txt`, `Makefile`, `.env.example` | OPS-06, BD-11 | — | AI | done | `make check` equivalent passes locally |
 | D2 | Test scaffolding: route smoke tests; golden-vector fixture + independent spec re-derivation test | spec §5.2, §5.5 | D1 | AI | done | `pytest` green; coverage gate set at baseline |
-| D3 | CI: lint, format, syntax, tests+coverage, `pip-audit`, Docker build + container smoke | OPS-01 | D1, D2 | AI | done | Workflow YAML valid; **first green run on GitHub still to be observed** |
-| D4 | `Dockerfile`, `.dockerignore`, `scripts/smoke.sh`, post-deploy smoke workflow (Render blueprint dropped; hosting is Vercel, ADR-0004) | OPS-02, OPS-03, OPS-04 | D3 | AI | done | Smoke script passes against local Gunicorn; **`docker build` not run yet (no Docker in authoring environment) — CI `docker` job is the first real build** |
+| D3 | CI: lint, format, syntax, tests+coverage, `pip-audit`, Docker build + container smoke | OPS-01 | D1, D2 | AI | done | Workflow YAML valid; first GitHub run on PR #1: all required jobs passed |
+| D4 | `Dockerfile`, `.dockerignore`, `scripts/smoke.sh`, post-deploy smoke workflow (Render blueprint dropped; hosting is Vercel, ADR-0004) | OPS-02, OPS-03, OPS-04 | D3 | AI | done | Smoke script passes against local Gunicorn; the CI `docker` job builds the image and smoke-tests the container (passed on PR #1) |
 | D5 | `GET /healthz` (no upstream calls, returns version) | FR-21, OPS-04 | D2 | AI | done | `test_healthz_is_ok_and_reports_version` passes |
 | D6 | Make `run.sh`/`run.bat` install from `requirements.txt` (not an ad hoc list) and fix the macOS-incompatible `hostname -I` LAN hint | BD-10 | — | AI | done | Both scripts start the app on a clean venv; no hard-coded package list |
 | D7 | Push the repo, open the first PR to prove CI is green, enable **branch protection on `main`** (require the `test` and `docker` checks, require PR, no force-push) | OPS-01 | D3 | H | todo | PR shows both required checks passing; direct push to `main` rejected |
