@@ -1,0 +1,68 @@
+# DealScope Runbook
+
+Operational procedures for the deployed service (Vercel; Docker image kept for portability). Spec references: OPS-01 … OPS-07.
+
+## Environments
+
+| Environment | Source | Deploy trigger | URL |
+|---|---|---|---|
+| Local | working tree | `make run` (dev server, `127.0.0.1:5000`) | `http://localhost:5000` |
+| Production | `main` | Vercel Git integration once connected; the first release was a CLI deploy | repository variable `PROD_URL` |
+
+Configuration is by environment variable only (`spec.md` §6.3, `.env.example`). Change it in Vercel → Project → Settings → Environment Variables, then redeploy (variables apply to new deployments only).
+
+Production variables: `APP_ENV=production`. Leave `PROPERTY_PROVIDER` unset (defaults to `disabled`) until the provider-terms decision (plan P0-1) is recorded in `spec.md` §12.
+
+## First-time setup (human, once)
+
+1. Open the pull request and confirm the `test` and `docker` checks pass.
+2. GitHub → Settings → Branches: protect `main` — require a pull request, require the `test` and `docker` status checks, block force-pushes.
+3. Vercel dashboard → the `dealscope` project → Settings → Git → connect the GitHub repository, production branch `main`. (Until then, deploy manually — see Release.)
+4. GitHub → Settings → Secrets and variables → Actions → Variables → add `PROD_URL` (the production domain, e.g. `https://dealscope-xxxx.vercel.app`). Run **Actions → Deployed smoke check → Run workflow**.
+
+## Release
+
+With Git integration: merge the approved PR to `main`; Vercel builds and promotes automatically. Manual (CLI, needs Node and `vercel login`):
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"   # if Node is installed there
+vercel deploy --prod --yes
+```
+
+Then run the smoke check (Actions → **Deployed smoke check**, or):
+
+```bash
+make smoke URL=https://<production-domain>
+```
+
+If anything fails, roll back.
+
+## Rollback
+
+Target: restore the previous version in under 10 minutes without editing code.
+
+1. Vercel → Project → **Deployments** → open the last good production deployment → **⋯ → Promote to Production** (or `vercel rollback`).
+2. Run the smoke check.
+3. Make the repository match: `git revert <bad-sha>` on a branch, open a PR, merge. Otherwise the next push redeploys the bad code.
+4. Record what happened in a short post-incident note: trigger, detection, fix, and the test or guardrail added.
+
+> Rehearsal record (plan D9): _not yet performed_. Fill in date, duration, and any surprises.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| Build fails | Dependency or Python version problem | Vercel → Deployments → Build logs; reproduce with `make check` using Python 3.12 |
+| Function error 500 on every request | Import error at start-up | Vercel → Logs; the `request_id` in the error body maps to a log line |
+| Slow first request | Serverless cold start | Retry; `smoke.sh` already retries 6× |
+| Many `PROVIDER_*` errors | Provider enabled and upstream unavailable/throttling | Set `PROPERTY_PROVIDER=disabled` and redeploy to force manual entry; open an issue with the request id |
+| Unexpected 429 | Per-instance rate limit (`RATE_LIMIT`) | Check for a client loop; raise only deliberately |
+| 401 from the URL | Vercel Deployment Protection on preview URLs | Use the production domain, or `vercel curl` / a bypass token for previews |
+
+## Logs and data handling
+
+Logs are one-line JSON on stdout (Vercel captures them): request id, route, status, latency, error code — **not** addresses, request bodies, query strings, or upstream payloads (spec OPS-07). Do not add such fields while debugging; use a fixture. The service stores no user data.
+
+## Secrets
+
+None today. If a licensed provider is added, store its key as a Vercel environment variable marked Sensitive (never in the repo, logs, or screenshots), rotate on suspected exposure, and add an empty placeholder to `.env.example`.

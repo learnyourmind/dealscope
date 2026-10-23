@@ -1,0 +1,8 @@
+# Tool config lives in ruff.toml / pytest.ini / .coveragerc, NOT pyproject.toml: Vercel installs
+# from pyproject.toml whenever one exists, which would skip requirements.txt (see ADR-0004).
+line-length = 100
+target-version = "py39"
+extend-exclude = [".venv", "venv"]
+
+[lint]
+select = ["E", "F", "W", "B", "I"]

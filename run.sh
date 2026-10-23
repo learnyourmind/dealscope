@@ -1,26 +1,26 @@
 #!/bin/bash
+set -e
+cd "$(dirname "$0")"
 echo ""
-echo "  🏠 DealScope — Real Estate Investment Analyzer"
+echo "  DealScope — first-pass rental property analysis"
 echo "  ==============================================="
-echo "  Zero API keys required"
 echo ""
 
-# Check Python
 if ! command -v python3 &> /dev/null; then
-    echo "  ❌ Python 3 not found. Install from https://python.org"
+    echo "  Python 3 not found. Install from https://python.org"
     exit 1
 fi
 
-# Install dependencies
-echo "  Installing dependencies..."
-pip3 install flask flask-cors requests --quiet --break-system-packages 2>/dev/null || \
-pip3 install flask flask-cors requests --quiet 2>/dev/null
+if [ ! -d .venv ]; then
+    echo "  Creating virtual environment..."
+    python3 -m venv .venv
+fi
+echo "  Installing dependencies from requirements.txt..."
+.venv/bin/pip install --quiet -r requirements.txt
 
-echo "  Starting server..."
 echo ""
-echo "  ✅ Open your browser at: http://localhost:5000"
-echo "  ✅ Share with others on your network: http://$(hostname -I | awk '{print $1}'):5000"
-echo ""
+echo "  Open your browser at: http://localhost:${PORT:-5000}"
+echo "  (Set HOST=0.0.0.0 to share on your network; only on a trusted network.)"
 echo "  Press Ctrl+C to stop"
 echo ""
-python3 app.py
+exec .venv/bin/python app.py

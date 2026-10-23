@@ -1,0 +1,31 @@
+name: Deployed smoke check
+
+# Post-deploy verification (spec OPS-04). Set the repository variable PROD_URL
+# (Settings → Secrets and variables → Actions → Variables). Run manually right after
+# a release, and on a schedule as a cheap uptime signal.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Base URL to check (defaults to the PROD_URL variable)
+        required: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET: ${{ github.event.inputs.url || vars.PROD_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when no URL is configured
+        if: env.TARGET == ''
+        run: echo "PROD_URL is not set; nothing to check."
+      - name: Smoke check
+        if: env.TARGET != ''
+        run: bash scripts/smoke.sh "$TARGET"

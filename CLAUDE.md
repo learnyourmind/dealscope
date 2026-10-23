@@ -6,26 +6,43 @@ DealScope is a Python/Flask web app intended to help US residential real-estate 
 
 Keep this guide and [intent.md](./intent.md) in view when working on the project. `CLAUDE.md` describes the repository and engineering practices; `intent.md` describes the product goal and how to assess proposed features.
 
+## Document hierarchy (read in this order)
+
+1. [intent.md](./intent.md) — why: product purpose, principles, acceptance criteria.
+2. [spec.md](./spec.md) — what and how: requirements (`FR-`, `OPS-`), known defects (`BD-`), formulas, API, design, decision log.
+3. [plan.md](./plan.md) — in what order: phased tasks with status and a "Done when" check each.
+4. [docs/ai-sdlc.md](./docs/ai-sdlc.md) — the task loop, human gates, and guardrails for AI agents. Slash commands: `/next-task`, `/verify`, `/spec-sync`; reviewer subagent: `spec-reviewer` (all in `.claude/`).
+
+If the spec is silent or contradictory, do not invent behavior: record an open question and stop. Product defaults in spec §11.1 are *proposed* until the decision log says approved.
+
 ## Repository map
 
-- `app.py` — Flask application, embedded HTML template, Redfin data access, regional assumptions, and the current financial analysis.
+- `app.py` — Flask app factory, routes, error handling, logging. Business logic lives in `dealscope/`; HTML in `templates/`, assets in `static/`.
 - `README.md` — setup instructions, documented analysis features, and limitations.
-- `requirements.txt` — Python runtime dependencies.
+- `requirements.txt` / `requirements-dev.txt` — runtime and development (pytest, ruff, pip-audit) dependencies.
 - `run.sh` / `run.bat` — local startup scripts for macOS/Linux and Windows.
-- `Procfile` — Gunicorn web process definition for deployment platforms.
+- `Procfile` — Gunicorn web process definition for Procfile-based platforms.
+- `Dockerfile` — portable production image (built and smoke-tested in CI). `.python-version`, `.vercelignore` — Vercel deployment (see [ADR-0004](./docs/adr/0004-deploy-on-vercel.md); Docker kept for portability, see ADR-0003).
+- `ruff.toml`, `pytest.ini`, `.coveragerc`, `Makefile` — lint/test/coverage configuration and the `make` entry points below. Do **not** add a `pyproject.toml`: Vercel would install from it and skip `requirements.txt` (ADR-0004).
+- `tests/` — pytest suite (validation, analysis against the golden vectors in `tests/fixtures/golden_vectors.json`, provider adapter with synthetic payloads, API and UI routes). No live network.
+- `.github/` — CI (`ci.yml`), post-deploy smoke workflow, Dependabot, PR and task templates.
+- `docs/` — `ai-sdlc.md`, `runbook.md` (deploy, rollback), `adr/` (architecture decisions).
+- `scripts/smoke.sh` — post-deploy check (`/healthz` and `/` must return 200).
+- `.env.example` — every configuration variable (no secrets today).
 
-There is currently no separate frontend, test suite, database, or application configuration module. Do not assume these exist.
+There is no database, cache, or separate frontend build. Do not assume these exist.
 
 ## Implemented baseline and documentation gap
 
-The current code is much smaller than the feature list in `README.md`:
+Shipped (see `plan.md` for status):
 
-- `app.py` defines a Flask app with `/` and `POST /analyze`.
-- The root route renders the `HTML` string in `app.py`; that string currently contains a placeholder rather than a working interface.
-- `RedfinEngine` calls Redfin's unofficial public endpoints to search for a property and retrieve details and comparable sales.
-- `PropertyAnalyzer.analyze` calculates a basic estimate using regional constant tables. Its current response includes property basics, monthly cash flow, cap rate, down payment, monthly principal and interest, estimated rent, and a basic BUY/CAUTION verdict.
-- The current analysis does not return most of the richer data described in the README (for example market snapshots, price history, detailed projections, investor scores, or risks/opportunities). The fetched comparable sales are not currently included in the response.
-- Some unavailable values use hard-coded fallback assumptions. Treat resulting numbers as estimates, not verified property facts.
+- `app.py` — `create_app()` factory (module-level `app` for Gunicorn/Vercel): `GET/POST /` (server-rendered form and results), `POST /analyze` (JSON API), `GET /healthz`; error envelope, request IDs, structured logging without addresses, optional CORS, per-process rate limit.
+- `dealscope/` — `validation.py` (bounds), `analysis.py` (pure calculations + provenance), `assumptions.py` (state tables, defaults), `provider.py` (provider interface, disabled default, Redfin adapter), `service.py`, `errors.py`, `config.py`, `ratelimit.py`, `forms.py`.
+- `templates/index.html`, `static/` — accessible no-JS-required UI (JS only prevents double submit and moves focus).
+- Every value is classified `retrieved | user | estimate | unavailable`. No BUY/CAUTION verdict is produced (spec D-07).
+- The property-data provider is **disabled by default** (`PROPERTY_PROVIDER=disabled`): users enter price, bedrooms, and state. The Redfin adapter is written against *unverified* payload shapes and tested only with synthetic fixtures; enabling it needs the terms review in plan P0-1.
+
+Not shipped (aspirational, from the README): market snapshots, price history, comparable sales, multi-method rent estimates, projections, investor scores, risks/opportunities, buy-box pricing. Tax, insurance, and rent use rough state-level constants that were carried over unverified.
 
 When changing functionality, distinguish clearly between what is implemented and what is aspirational. Update the README whenever the shipped behavior or setup instructions change.
 
@@ -48,7 +65,7 @@ For each feature or fix:
 - Treat Redfin endpoints as unofficial and potentially unavailable or changed. Use bounded network timeouts, check HTTP status, and handle expected upstream failures explicitly when modifying network access.
 - Keep regional rates and rent assumptions identifiable as estimates. Avoid implying that state-level averages are property-specific or current quotes.
 - Do not add API keys or credentials to the repository. If a future provider requires credentials, use environment configuration and document setup without recording secrets.
-- The app enables Flask-CORS globally and binds to `0.0.0.0` when run directly. Consider the security and deployment implications before expanding exposure or accepting new kinds of input.
+- CORS is off unless `CORS_ORIGINS` lists origins (and then applies to `POST /analyze` only). The dev server binds to `127.0.0.1` unless `HOST` is set. Consider the security and deployment implications before expanding exposure or accepting new kinds of input.
 - `requirements.txt` is the dependency manifest. Keep local startup scripts consistent with it when changing dependencies.
 
 ## Useful commands
@@ -60,15 +77,24 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-The development server uses `PORT` when set and otherwise listens on port `5000`. `bash run.sh` and `run.bat` are the platform startup scripts. Deployment uses the `web: gunicorn app:app` command in `Procfile`.
+The development server uses `PORT` when set and otherwise listens on port `5000`. `bash run.sh` and `run.bat` are the platform startup scripts. Procfile platforms use `web: gunicorn app:app`; Vercel runs the module-level `app` directly.
 
-No test command is currently defined. For a basic syntax check, run:
+Development workflow (creates `.venv` on first run):
 
 ```bash
-python -m py_compile app.py
+make install   # venv + runtime and dev dependencies
+make check     # ruff lint + format check, pytest with coverage gate, py_compile — what CI runs
+make audit     # pip-audit on requirements.txt
 ```
 
-Add a repeatable test command when tests are added, and document it here and in the README.
+`make test` runs only pytest. The coverage gate in `pytest.ini` is a ratchet: raise it when coverage rises, never lower it to get a change through. Tests must not touch the network.
+
+Build and smoke-test the production image (needs Docker):
+
+```bash
+make docker
+make smoke URL=https://your-deployment.vercel.app
+```
 
 ## Definition of done
 

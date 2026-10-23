@@ -55,10 +55,10 @@ For a new or changed analysis feature, check that:
 
 ## Current known limitations
 
-- Property lookup depends on Redfin's unofficial public endpoints, which can change or become unavailable.
-- Current rent, tax, and insurance calculations rely on simplified regional constants, not property-specific quotes or verified local research.
-- The current financial output is limited and does not yet implement the full analysis described in the README.
-- The root page uses placeholder HTML rather than a finished user interface.
-- There is no test suite or database in the current repository.
+- Automatic property lookup is off by default. The Redfin adapter depends on unofficial endpoints, is unverified against the live service, and needs a terms review before use; today the user enters price, bedrooms, and state.
+- Rent, tax, and insurance rely on simplified state-level constants carried over from the prototype, not property-specific quotes or verified local research. They are labeled as low-confidence estimates.
+- Cash-on-cash return counts the down payment only; closing costs and reserves are excluded and stated as such.
+- No market snapshot, price history, comparable sales, multi-method rent estimate, projections, investor scores, risks/opportunities, or buy-box pricing yet; no recommendation is produced.
+- Analyses are not stored (no database). The built-in rate limit is per process.
 
 These limitations should be addressed explicitly when relevant to a feature; they should not be obscured by more confident UI language.
