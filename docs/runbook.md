@@ -11,7 +11,7 @@ Operational procedures for the deployed service (Vercel; Docker image kept for p
 
 Configuration is by environment variable only (`spec.md` §6.3, `.env.example`). Change it in Vercel → Project → Settings → Environment Variables, then redeploy (variables apply to new deployments only).
 
-Production variables: `APP_ENV=production`. Leave `PROPERTY_PROVIDER` unset (defaults to `disabled`) until the provider-terms decision (plan P0-1) is recorded in `spec.md` §12.
+Production variables: `APP_ENV=production`. `GEOCODER` defaults to `census`; set `GEOCODER=disabled` to switch address lookup off. Refresh market data monthly: `python scripts/update_market_data.py`, review the as-of dates, and open a PR.
 
 ## First-time setup (human, once)
 
@@ -55,7 +55,7 @@ Target: restore the previous version in under 10 minutes without editing code.
 | Build fails | Dependency or Python version problem | Vercel → Deployments → Build logs; reproduce with `make check` using Python 3.12 |
 | Function error 500 on every request | Import error at start-up | Vercel → Logs; the `request_id` in the error body maps to a log line |
 | Slow first request | Serverless cold start | Retry; `smoke.sh` already retries 6× |
-| Many `PROVIDER_*` errors | Provider enabled and upstream unavailable/throttling | Set `PROPERTY_PROVIDER=disabled` and redeploy to force manual entry; open an issue with the request id |
+| Many `PROVIDER_*` errors | Census Geocoder slow, throttling, or down | Retry later; do not loop. Open an issue with the request id; `GEOCODER=disabled` turns lookup off |
 | Unexpected 429 | Per-instance rate limit (`RATE_LIMIT`) | Check for a client loop; raise only deliberately |
 | 401 from the URL | Vercel Deployment Protection on preview URLs | Use the production domain, or `vercel curl` / a bypass token for previews |
 

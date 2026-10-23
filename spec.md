@@ -1,7 +1,7 @@
 # DealScope — Product Requirements and Design Specification
 
-**Version:** 0.2  
-**Status:** Baseline for engineering planning. Product decisions in §11.1 are *proposed defaults* that unblock engineering; they are not owner-approved until marked so in the decision log.  
+**Version:** 0.3  
+**Status:** v0.3 (2026-10-23) changes direction per the owner: **address is the only user input**, free public data sources replace the unofficial Redfin adapter, and the product computes the purchase price a rental can support (see `intent.md`, ADR-0005). Defaults in §11.1 were approved by the owner on 2026-10-23 except where the decision log says otherwise.  
 **Source of truth:** `intent.md` for product intent; this document translates that intent into requirements and design for the current repository. `plan.md` sequences the work; `docs/ai-sdlc.md` defines how it is built, verified, and deployed.  
 **Product:** DealScope, a first-pass US residential rental-property analysis tool  
 **Current implementation:** Flask application in `app.py`; current UI is a placeholder.
@@ -10,13 +10,13 @@
 
 ## 1. Executive summary
 
-DealScope should let a prospective residential property investor enter an address, review available property information, adjust a small set of assumptions, and understand an explainable estimate of rental economics and purchase viability.
+DealScope lets a prospective residential property investor type a US address and see, for that area, the rent homes typically earn and the **highest purchase price at which that rent still covers mortgage, property tax and insurance (PITI) — and, separately, meets a monthly cash-flow goal after vacancy, management and maintenance**. Results are shown for a typical home and for 1–4 bedrooms, with the monthly math behind every price.
 
-The implementation should evolve the existing Flask application incrementally. The first release should deliver a working, accessible address-to-analysis flow and trustworthy estimates before attempting advanced market data, long-term projections, investor scores, or AI-generated analysis. Every reported number must be traceable to a source or stated assumption. Missing or unavailable data must not silently become a successful-looking property analysis.
+The address is the only required input. Rent and typical home value come from free public data (Zillow Research ZIP indexes), the address is matched with the US Census Geocoder, and tax/insurance use labeled state averages unless the user enters rates. No property-level facts (price, bedrooms, size) are asked for or retrieved. Every reported number is traceable to a source or a stated assumption; missing data never silently becomes a successful-looking result.
 
-This is an informational decision-support product. It must not promise returns, present estimates as quotes or verified facts, or imply that a BUY/CAUTION label is personalized financial advice.
+This is an informational decision-support product. Prices are the output of the user's stated criteria, not appraisals, forecasts, or personalized financial advice.
 
-## 2. Repository baseline
+## 2. Repository baseline (historical: the prototype as found at v0.2)
 
 The repository currently contains:
 
@@ -66,26 +66,26 @@ Found by reading `app.py` (version control history shows an earlier 1,300-line `
 - Guaranteed accuracy, predicted returns, or a guarantee that a property is a good investment.
 - User accounts, saved portfolios, sharing, multi-property workflows, or persistent personal data.
 - AI-generated investment recommendations. Do not add an LLM dependency or send property/user data to an AI provider as part of this specification.
+- Retrieving property-level facts (list price, bedrooms, square footage, assessor records): no free licensed national source exists. Do not scrape listing sites.
 - Native mobile applications. The responsive web experience is the initial target.
 
 ## 4. Target users and primary journey
 
 ### Primary user
 
-An individual investor screening a US residential property before deciding whether to conduct deeper due diligence.
+An individual investor deciding where to look for a rental property in the US.
 
 ### Primary journey
 
-1. The user opens DealScope and understands what the tool does and does not do.
-2. The user enters a US property address.
-3. The system searches its configured property-data source and presents a selection when the match is ambiguous.
-4. The user confirms the property and reviews any retrieved property facts and their source/freshness.
-5. The user reviews or changes financing assumptions, initially down-payment percentage and annual interest rate.
-6. The user runs an analysis.
-7. The result presents the estimated rent, monthly operating costs, financing costs, cash flow, NOI, cap rate, and cash-on-cash return where the inputs support calculation.
-8. The user can inspect assumptions, missing data, formula explanations, and limitations before deciding whether to investigate further.
+1. The user opens DealScope and understands what it does and does not do.
+2. The user enters a US address (the only required input).
+3. The system matches it with the Census Geocoder; if several addresses match, the user picks one (nothing is analyzed from an arbitrary first result).
+4. The system looks up the ZIP's typical rent and typical home value and shows their source and as-of date.
+5. The user may adjust financing (down payment, rate, term), the monthly cash-flow goal, a rent adjustment, tax and insurance rates, and HOA.
+6. The result shows, for a typical home and for 1–4 bedrooms: estimated rent, **PITI break-even price**, **all-in break-even price**, and **target price**, plus the monthly math at the target price and how it compares with typical home values.
+7. The user inspects assumptions, sources, and limitations before deciding whether to investigate further.
 
-On an upstream failure or unusable property record, the user receives a clear retryable error and retains their entered assumptions. A partial analysis is only allowed when each omitted or estimated value is clearly identified and the affected metrics are adjusted or withheld.
+On an upstream failure, unmatched address, or ZIP without data, the user receives a clear, retryable (where applicable) error and keeps their entries.
 
 ## 5. Requirements
 
@@ -96,27 +96,27 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | ID | Priority | Requirement |
 |---|---|---|
 | FR-01 | P0 | Provide a responsive landing/analysis page with address input, brief product explanation, and visible informational-use disclaimer. |
-| FR-02 | P0 | Validate submitted address and analysis assumptions on the server. Reject missing, wrong-type, non-finite, or out-of-range values with a useful client-safe error. |
-| FR-03 | P0 | Search for a property using a data provider behind a replaceable provider boundary. Present a user confirmation/selection if the provider returns ambiguous candidates; do not silently analyze an arbitrary first result. |
-| FR-04 | P0 | Retrieve property facts required for analysis and track their source, retrieval time, and whether a value is reported, user-provided, or estimated. |
-| FR-05 | P0 | Provide an assumptions form for down-payment percentage and annual interest rate. Preserve submitted values through validation and upstream errors. Define sensible bounds in implementation and test their edges. |
-| FR-06 | P0 | Calculate and display purchase price, down-payment amount, loan amount, monthly principal and interest, estimated monthly rent, operating expenses, NOI, monthly cash flow, cap rate, and cash-on-cash return only when required inputs exist. |
-| FR-07 | P0 | Show a categorized monthly expense breakdown. Clearly separate operating expenses from debt service; do not include principal and interest in NOI or cap-rate calculation. |
+| FR-02 | 1.1, 1.2, 1.8 | Validation boundary tests; route tests |
+| FR-03 | P0 | Resolve the address with a geocoder behind a replaceable boundary. No match ⇒ not found; several matches ⇒ user selection (never silently take the first). |
+| FR-04 | P0 | Retrieve area data for the matched ZIP (typical rent, typical home value) and track source, as-of date, and kind (retrieved vs estimate vs user vs unavailable) for every value. |
+| FR-05 | P0 | Provide optional assumption inputs (down payment %, annual rate %, loan term, monthly cash-flow goal, rent adjustment %, property-tax rate, insurance rate, HOA) with visible defaults. Preserve submitted values through validation and upstream errors. |
+| FR-06 | P0 | For a typical home and each of 1–4 bedrooms, calculate and display rent and three purchase prices — PITI break-even, all-in break-even, target (meets the cash-flow goal) — plus, at the target price, monthly P&I, tax, insurance, PITI total, other costs, cash flow, cap rate, and cash-on-cash return. A value is shown only when its inputs exist; an unreachable target is shown as such, never as $0. |
+| FR-07 | P0 | Show PITI separately from other ownership costs (vacancy, management, maintenance reserve, HOA). Principal and interest are never part of NOI or cap rate. |
 | FR-08 | P0 | Explain each estimate and financial metric through visible labels, a concise methodology explanation, and an assumptions/source detail area. Include units and time period. |
-| FR-09 | P0 | Mark unavailable data as unavailable. Do not substitute invented property details, a default state, or a plausible-looking price without an explicit, disclosed assumption and user confirmation. |
-| FR-10 | P0 | Handle property not found, ambiguous match, upstream timeout/rate limit/unavailability, malformed upstream response, and internal failure as distinct user-safe states. |
-| FR-11 | P0 | Provide a recommendation state only when its decision rule is documented and inputs are adequate. Explain its threshold and basis. Prefer a neutral “meets/does not meet your criteria” framing over an unconditional “BUY” instruction. |
+| FR-09 | P0 | Mark unavailable data as unavailable. Do not substitute invented values, a default state, or a default ZIP. Unknown HOA is counted as $0 but flagged on every price. |
+| FR-10 | P0 | Handle address not found, ambiguous match, ZIP without data, geocoder timeout/rate limit/unavailability, malformed upstream response, and internal failure as distinct user-safe states. |
+| FR-11 | P0 | Prices are presented as calculations from the user's stated criteria ("up to $X keeps cash flow ≥ $Y"), with the formula inputs visible. No BUY/PASS verdict, score, or imperative wording. Wording changes need product/legal review. |
 | FR-12 | P0 | State clearly that estimates are for informational purposes, not professional financial, tax, legal, insurance, appraisal, or lending advice. Encourage local verification. |
 | FR-13 | P0 | Update README setup and feature descriptions when the usable interface or analysis output changes. |
-| FR-14 | P1 | Expand rental estimation into multiple documented methods, including rent-to-price, bedroom/market benchmark, and price-per-square-foot when credible inputs exist. Show method contributions and uncertainty; do not imply calibration where none exists. |
+| FR-14 | P1 | Replace the bedroom-scaling heuristic with a permitted bedroom-level rent source and show rent ranges. ZIP-level rent (Zillow ZORI) is delivered in P0. |
 | FR-15 | P1 | Add comparable sales when provider data is available, with dates, distance/context when supplied, and source attribution. Do not describe asking/list prices as verified sale prices unless provider fields confirm that meaning. |
 | FR-16 | P1 | Add market snapshot and price-history displays only when data, definitions, time coverage, and provenance are available. |
-| FR-17 | P1 | Add an investor buy box with user-configurable criteria and calculated target/maximum price. Avoid fixed unexplained verdict thresholds. |
+| FR-17 | P1 | Extend the buy box beyond cash flow (minimum cap rate, cash-on-cash, maximum price vs value). The cash-flow-goal price solver is delivered in P0 via FR-06/FR-11. |
 | FR-18 | P2 | Add five-/ten-year scenario projections only after assumptions for rent growth, appreciation, expense growth, sale costs, and financing are specified and user-visible. Use scenarios, not predictions. |
 | FR-19 | P2 | Add investor scores only if their inputs, weighting, interpretation, and limitations can be explained; scores must not conceal missing data. |
 | FR-20 | P2 | Add risk/opportunity summaries based on traceable data or explicit rules. No unsupported “expert” claims. |
 | FR-21 | P0 | Expose `GET /healthz` returning `200 {"status":"ok","version":"<app version>"}` without calling any upstream provider, for deployment health checks (see OPS-04). |
-| FR-22 | P0 | When the provider is unavailable or returns insufficient data, let the user enter price, beds, and state manually; such values are classified as user assumptions (§5.2) and the result is labeled as based on user-entered facts. Because the provider ships disabled (D-01), this is the primary path at launch. Optional `assumptions.monthly_rent` (USD 100–50,000) lets the user override the rent estimate (classified `user`). |
+| FR-22 | — | Withdrawn; regression test that `property` input is rejected |
 
 ### 5.2 Data and calculation requirements
 
@@ -146,39 +146,39 @@ The implementation must document formulas in code and user-facing methodology te
 
 The existing use of a single fixed state-level estimate and silent property fallbacks is not sufficient for a production-quality recommendation. Initial regional benchmarks may remain if they are labeled, versioned/documented, and explicitly shown as estimates. Values without a defensible source should be omitted or require user entry.
 
-#### Input bounds (proposed)
+#### Input bounds
 
-Enforced server-side (FR-02); the UI mirrors them for convenience but is never the only check. Out-of-range values are rejected, never clamped.
+Enforced server-side (FR-02); the UI mirrors them for convenience but is never the only check. Out-of-range values are rejected, never clamped. Unknown fields are rejected.
 
 | Input | Type | Bounds | Default |
 |---|---|---|---|
 | `address` | string | trimmed length 5–200; no control characters | required |
-| `down_payment_pct` | number | 5 ≤ x ≤ 100 (investor financing rarely goes below 15–25%; 5 is a permissive floor) | 20 |
+| `down_payment_pct` | number | 5 ≤ x ≤ 100 | 20 |
 | `annual_interest_rate_pct` | number | 0 ≤ x ≤ 25; finite | 7.0 |
 | `loan_term_years` | integer | one of 15, 20, 30 | 30 |
-| `monthly_rent` | number, optional | 100 ≤ x ≤ 50,000; overrides the model estimate | model estimate |
-| `property.purchase_price` | number | 10,000 ≤ x ≤ 50,000,000 | required with `property` |
-| `property.beds` | integer | 0–10 (rent estimates cover 1–5) | required with `property` |
-| `property.state` | string | supported two-letter state code | required with `property` |
-| `property.hoa_monthly` | number, optional | 0–10,000; omitted ⇒ unavailable | unavailable |
-| `candidate_id` | string, optional | 1–12 digits | none |
+| `min_monthly_cash_flow` | number | 0 ≤ x ≤ 10,000 USD/month | 100 (placeholder default; user-editable) |
+| `rent_adjustment_pct` | number | −50 ≤ x ≤ 100 | 0 |
+| `property_tax_rate_pct` | number, optional | 0 ≤ x ≤ 5 per year | state average (estimate) |
+| `insurance_rate_pct` | number, optional | 0 ≤ x ≤ 5 per year | state average (estimate) |
+| `hoa_monthly` | number, optional | 0 ≤ x ≤ 10,000 | unknown (counted as $0, flagged) |
 
-`down_payment_pct = 100` gives a zero loan: principal and interest is `0`, not a division error. `annual_interest_rate_pct = 0` divides the loan evenly over the term.
+`down_payment_pct = 100` gives a zero loan: principal and interest is `0`. `annual_interest_rate_pct = 0` divides the loan evenly over the term.
 
-#### Default operating assumptions (proposed)
+#### Data sources and defaults
 
-These carry over from the current code and must be labeled *model estimate* (editable by the user from FR-17 onward). Rates are per-month figures derived from annual values.
-
-| Item | Rule | Source in current code |
+| Item | Rule | Kind shown |
 |---|---|---|
-| Vacancy | 5% of gross monthly rent | `rent * 0.05` |
-| Management | 8% of gross monthly rent | `rent * 0.08` |
-| Maintenance / CapEx reserve | 1% of purchase price per year ÷ 12 | `price * 0.01 / 12` |
-| Property tax | state effective rate × price ÷ 12 | `TAX_RATES` table (state average, **not** property-specific) |
-| Insurance | state average rate × price ÷ 12 | `INS_RATES` table (state average) |
-| HOA | provider-reported monthly value; if absent, *unavailable* — metrics are qualified, not silently zeroed | `hoa or 0` (BD-02) |
+| Address, ZIP, state, county | US Census Bureau Geocoder (`geocoding.geo.census.gov`, benchmark `Public_AR_Current`), free, no key | retrieved |
+| Typical rent (ZIP) | Zillow Observed Rent Index, all homes + multifamily, smoothed, latest month, from the bundled snapshot `data/zip_market.json` (rebuilt by `scripts/update_market_data.py`) | retrieved (estimate when the user applies a rent adjustment) |
+| Typical home value (ZIP) | Zillow Home Value Index, single-family + condo, middle tier, same snapshot | retrieved |
+| Rent by bedroom count | Typical rent × heuristic factor (1BR 0.67, 2BR 0.87, 3BR 1.13, 4BR 1.41; derived from prototype benchmark rents) | estimate, low confidence |
+| Property tax, insurance | State-average tables (prototype constants, **unverified**), or user-entered rates; DC/territories have no table and require entered rates | estimate, low confidence / user |
+| Vacancy | 5% of gross monthly rent | estimate |
+| Management | 8% of gross monthly rent | estimate |
+| Maintenance / CapEx reserve | 1% of purchase price per year ÷ 12 | estimate |
+| HOA | user-entered; otherwise unknown | user / unavailable |
 
-Rent estimate (P0): the existing blend of rent-to-price ratio and bedroom benchmark scaled by `STATE_COST`, rounded to the nearest $25, labeled *model estimate* and shown with an explicit "state-level benchmark, not a market quote" note. It is withheld when state or bedroom count is unavailable. P1 (FR-14) replaces it with documented multi-method estimates.
+A ZIP with no rent value returns `INSUFFICIENT_DATA`; there is no fallback rent. County assessor records are not used (no free national API).
 
 #### Golden test vector
 
@@ -207,54 +207,80 @@ Used verbatim as a unit test for the calculation module. Inputs are explicit so 
 
 Tests compare currency to the cent and percentages to two decimals. Additional vectors must cover 0% interest, 100% down, zero/negative NOI, and missing HOA (metric qualified).
 
+#### Price solver (closed form)
+
+For a given gross monthly rent `R`, every ownership cost except HOA is linear in the purchase price `P`, so the highest price meeting a cash-flow floor `F` is:
+
+```
+k            = monthly payment per $1 of loan (rate, term)           [0 rate ⇒ 1 / (12·years)]
+cost per $P  = (tax% + insurance% [+ capex%]) / 1200 + (1 − down%/100) · k
+income       = R                      (PITI break-even)
+             = R · (1 − vacancy% − management%)   (all-in)
+P_max        = (income − HOA − F) / cost per $P        ⇒ none if the numerator ≤ 0
+```
+
+Three prices per scenario: **PITI break-even** (no vacancy/management/capex; F = 0), **all-in break-even** (all costs; F = 0), **target** (all costs; F = the user's goal). Prices are floored to the nearest $1,000 so they never overstate what the assumptions support; a price below $1,000 is reported as unreachable. Tests must round-trip: cash flow at the unrounded price equals F, and ordering `PITI ≥ all-in ≥ target` holds when F ≥ 0. The golden `price_vectors` in `tests/fixtures/golden_vectors.json` fix the numbers.
+
 #### Recommendation policy
 
-The intent asks for explainable recommendations and buy-box pricing but does not define investment criteria. Before implementing thresholds, product must specify whether a recommendation is based on user-defined criteria, a transparent default buy box, or both. Until then:
+Prices are calculations from the user's own criteria (owner direction 2026-10-23, superseding D-07's "no recommendation"). Required framing:
 
-- Do not use an unexplained BUY/CAUTION label.
-- Do not present a single score as an investment decision.
-- A neutral summary may report whether user-provided targets are met, with the criteria and values beside it.
+- State the criteria next to the number ("keeps cash flow at or above $100/mo after …").
+- Say what the price is not: not an appraisal, listing price, forecast, or advice.
+- Compare with the ZIP's typical home value as context only, and say what the gap means (rent supports X% of typical prices).
+- No BUY/PASS labels, scores, urgency, or guaranteed-return language.
 
 ### 5.3 API requirements
 
 The current endpoint is `POST /analyze`; the following contract is a target, not a promise of backward compatibility. Keep the browser/API integration internally consistent. If external consumers exist, version the API before breaking the current shape.
 
-#### Request (proposed)
+#### Request
 
 ```json
 {
-  "address": "123 Main St, Austin, TX",
+  "address": "1100 Congress Ave, Austin, TX 78701",
   "assumptions": {
     "down_payment_pct": 20,
     "annual_interest_rate_pct": 7.0,
-    "loan_term_years": 30
+    "loan_term_years": 30,
+    "min_monthly_cash_flow": 100,
+    "rent_adjustment_pct": 0,
+    "property_tax_rate_pct": 1.63,
+    "insurance_rate_pct": 1.55,
+    "hoa_monthly": 0
   }
 }
 ```
 
-The server must validate JSON type, required fields, string length, numeric finiteness, and documented bounds. Never accept provider URLs or arbitrary network targets from the client.
+`assumptions` and every field in it are optional. The server validates JSON type, required fields, string length, numeric finiteness, and the bounds above. Never accept provider URLs or arbitrary network targets from the client.
 
-#### Success response (proposed shape)
+#### Success response
 
 ```json
 {
   "success": true,
   "analysis": {
-    "property": {
-      "address": {"value": "123 Main St, Austin, TX", "kind": "retrieved", "source": "provider", "retrieved_at": "ISO-8601 timestamp"},
-      "purchase_price": {"value": 400000, "unit": "USD", "kind": "retrieved", "source": "provider", "retrieved_at": "ISO-8601 timestamp"},
-      "beds": {"value": 3, "unit": "bedrooms", "kind": "retrieved", "source": "provider", "retrieved_at": "ISO-8601 timestamp"}
-    },
-    "assumptions": {},
-    "metrics": {},
-    "limitations": []
+    "location": {"address": {"value": "1100 CONGRESS AVE, AUSTIN, TX, 78701", "kind": "retrieved", "source": "US Census Bureau Geocoder"}, "zip": "78701", "state": "TX", "county": "Travis County"},
+    "market": {"zip": "78701", "typical_rent": {"value": 3177, "unit": "USD/month", "kind": "retrieved", "source": "Zillow Observed Rent Index (ZORI), ZIP 78701, 2026-09"}, "typical_home_value": {"value": 650693, "unit": "USD", "kind": "retrieved", "source": "…"}},
+    "assumptions": {"…": "each {value, unit, kind, basis|source}"},
+    "scenarios": [
+      {"key": "typical", "label": "Typical home in this ZIP", "beds": null,
+       "rent": {"value": 3177, "kind": "retrieved"},
+       "prices": {"piti_breakeven": {"value": 398000, "kind": "estimate"}, "allin_breakeven": {"value": 313000, "kind": "estimate"}, "target": {"value": 302000, "kind": "estimate"}},
+       "monthly_at_price": {"target": {"principal_interest": 1607.37, "property_tax": 410.22, "insurance": 390.08, "piti_total": 2407.67, "cash_flow": 104.65}},
+       "at_target": {"cap_rate_pct": 6.8, "cash_on_cash_pct": 2.08, "pct_of_zip_home_value": 46}}
+    ],
+    "qualifier": {"qualified": true, "note": "HOA is unknown …"},
+    "limitations": ["…"],
+    "sources": [{"name": "…", "url": "…", "used_for": "…"}],
+    "generated_at": "ISO-8601"
   }
 }
 ```
 
-This is an illustrative shape. Define complete schemas and required fields in implementation; do not return placeholder values such as `"provider"` as literal provenance.
+Scenario keys are `typical`, `1br`, `2br`, `3br`, `4br`. An unreachable price is `{"kind": "unavailable", "reason": "…"}` with no `value`. The shape is the implemented contract; additive changes are non-breaking.
 
-#### Error response (proposed shape)
+#### Error response
 
 ```json
 {
@@ -274,9 +300,9 @@ Use appropriate HTTP status codes (for example 400 for invalid input, 404 for no
 |---|---|---|---|
 | `INVALID_REQUEST` | 400 | Malformed JSON, wrong content type, unknown or missing field, wrong type | no |
 | `OUT_OF_RANGE` | 400 | Value outside §5.2 bounds; response names the field, not internals | no |
-| `PROPERTY_NOT_FOUND` | 404 | Provider answered successfully with no match | no |
-| `AMBIGUOUS_MATCH` | 422 | Several candidates; body includes `candidates` (id, display address) for selection | no |
-| `INSUFFICIENT_DATA` | 422 | Match found but required facts (price, beds, state) are unavailable | no (FR-22 offers manual entry) |
+| `PROPERTY_NOT_FOUND` | 404 | Geocoder answered successfully with no matching address | no |
+| `AMBIGUOUS_MATCH` | 422 | Several addresses match; body includes `candidates` (`id` = matched address text, `display`) for selection; the UI re-submits the chosen text | no |
+| `INSUFFICIENT_DATA` | 422 | Address matched but there is no ZIP or no rent for the ZIP (`missing`), or no state-average tax/insurance table (`needs_rates`: enter both rates) | no |
 | `PROVIDER_TIMEOUT` | 504 | Upstream exceeded the §5.5 timeout | yes |
 | `PROVIDER_RATE_LIMITED` | 503 | Upstream returned 429/403-style throttling; include `Retry-After` only if the provider supplied it | yes, later |
 | `PROVIDER_UNAVAILABLE` | 502 | Upstream 5xx, connection failure, or malformed/unrecognized payload | yes |
@@ -333,7 +359,7 @@ Therefore this specification cannot certify conformance to brand guidelines. Unt
 - **Reliability:** Bound upstream call duration; distinguish provider errors from valid empty results. Avoid returning stale or fallback values as current data.
 - **Performance:** Show loading feedback; set an explicit request timeout and enforce an overall reasonable request budget. The initial threshold should be measured in testing and adjusted using observed provider latency.
 - **Accessibility:** Target WCAG 2.2 AA for the delivered web workflow, including keyboard use, focus indication, contrast, labels, and screen-reader error/status announcements.
-- **Maintainability:** Isolate provider access, validation, financial calculations, and presentation sufficiently to test without live Redfin requests. Avoid expanding `app.py` into a monolith.
+- **Maintainability:** Isolate provider access, validation, financial calculations, and presentation sufficiently to test without live Census or Zillow requests. Avoid expanding `app.py` into a monolith.
 - **Compatibility:** Keep existing run scripts, `requirements.txt`, and `Procfile` consistent with app changes. Support the Python versions chosen for deployment and document them.
 - **Observability:** Log request outcomes, provider failures, and latency with safe correlation identifiers; do not log unnecessary personal/address data or upstream payloads.
 - **Documentation:** README must describe shipped behavior, dependencies, startup, provider limitations, and financial disclaimers.
@@ -364,7 +390,7 @@ Therefore this specification cannot certify conformance to brand guidelines. Unt
 | OPS-07 | P0 | Logs are structured one-line records to stdout with `request_id`, route, status, latency, and error code; they exclude addresses, request bodies, and upstream payloads (§7 Privacy). |
 | OPS-08 | P1 | Dependency updates arrive as automated pull requests (Dependabot) and pass the same CI gates. |
 | OPS-09 | P1 | A gated *staging* environment (or Vercel preview deployments) runs the smoke check before production promotion. |
-| OPS-10 | P1 | Provider-contract tests replay recorded fixtures of Redfin payloads and run nightly against the live provider **only if** Phase 0 approves such use; failure opens an issue rather than blocking unrelated pull requests. |
+| OPS-10 | P1 | A scheduled job rebuilds `data/zip_market.json` monthly and opens a pull request; a nightly contract check of the Census Geocoder opens an issue (not a blocking failure) when its response shape changes. |
 | OPS-11 | P2 | Alerting on elevated 5xx or `PROVIDER_*` rates and on `/healthz` failure. |
 
 ## 6. Proposed architecture
@@ -374,7 +400,7 @@ Preserve Flask and avoid introducing a frontend framework, database, or AI servi
 ```text
 app.py                  # Flask app creation and route registration
 dealscope/
-  provider.py           # Provider interface and Redfin adapter
+  provider.py           # Geocoder interface, Census adapter, ZIP market data
   analysis.py           # Typed input/output models and financial calculations
   validation.py         # Request validation and bounds
   errors.py             # Safe domain/provider error mapping
@@ -393,22 +419,24 @@ This is a target organization, not a required directory layout. Adopt only as ne
 
 #### Request flow
 
-Browser form → Flask route → validated request model → property provider → normalized property facts/provenance → deterministic analysis service → JSON or server-rendered result → UI.
+Browser form or JSON client → Flask route → validated `AnalysisRequest` → geocoder (address → `Location`) → ZIP market data (rent, home value) → deterministic analysis (price solver, provenance) → server-rendered page or JSON.
 
-Provider responses must be normalized at the boundary. Calculations must operate on normalized, typed values, not nested vendor JSON. Provider failure must not be hidden by fabricated property defaults.
+Vendor responses are normalized at the boundary. Calculations operate on typed values, never on vendor JSON. An upstream failure is never hidden by fabricated defaults.
 
 ### 6.1 Component responsibilities
 
 | Component | Responsibility | Must not |
 |---|---|---|
-| `app.py` | Create the Flask app (`create_app()` factory plus module-level `app` for Gunicorn), register routes, error handlers, request-ID and logging middleware | Contain calculations, vendor JSON parsing, or HTML |
-| `dealscope/validation.py` | Parse and validate the request into a typed `AnalysisRequest`; raise `ValidationError(code, field)` | Touch the network |
-| `dealscope/provider.py` | `PropertyProvider` protocol (`search(address) -> list[Candidate]`, `get_property(candidate_id) -> PropertyFacts`) and the Redfin adapter; applies §5.5 timeouts, maps HTTP and parse failures to `ProviderError` subclasses | Return vendor JSON, apply defaults, or compute metrics |
-| `dealscope/analysis.py` | Pure functions: mortgage payment, expenses, NOI, cap rate, cash-on-cash; returns values with `kind`/provenance and explicit `unavailable` markers | Perform I/O or read globals other than versioned assumption tables |
-| `dealscope/assumptions.py` | State tables and default rates, each with `as_of`/`source` metadata | Be imported by the provider layer |
-| `dealscope/errors.py` | Domain exceptions → (code, HTTP status, safe message) | Include exception text in messages |
-| `templates/`, `static/` | Accessible UI (§5.4), progressive enhancement over a plain form POST | Compute financial values client-side |
-| `tests/` | Unit, route, and fixture-based provider tests; no live network | Depend on Redfin availability |
+| `app.py` | `create_app()` factory plus module-level `app` (Gunicorn, Vercel); routes `/`, `/analyze`, `/healthz`; error handlers; request-ID, logging, rate-limit, CORS | Contain calculations or vendor parsing |
+| `dealscope/validation.py` | Parse and validate the request into `AnalysisRequest`; reject unknown fields | Touch the network |
+| `dealscope/provider.py` | `Geocoder` interface + `CensusGeocoder` (timeouts, status checks, size cap, error mapping) and `DisabledGeocoder`; `MarketData` reading the bundled ZIP snapshot | Return vendor JSON or apply defaults |
+| `dealscope/analysis.py` | Pure functions: mortgage payment, `compute_financials`, `max_purchase_price`, `floor_price`, `monthly_view`; `build_analysis` assembles scenarios with provenance | Perform I/O |
+| `dealscope/assumptions.py` | State tax/insurance tables, bedroom factors, default rates (each labeled low-confidence) | Be imported by the provider layer |
+| `dealscope/service.py` | Orchestrates geocode → market lookup → analysis; raises domain errors | Format output |
+| `dealscope/errors.py`, `config.py`, `ratelimit.py`, `forms.py` | Safe error mapping; env config; in-process limiter; form → payload | Include exception text in messages |
+| `data/zip_market.json`, `scripts/update_market_data.py` | Bundled Zillow Research ZIP snapshot (rent, home value, as-of dates) and its rebuild script | Be edited by hand |
+| `templates/`, `static/` | Accessible UI (§5.4), no third-party requests, works without JavaScript | Compute financial values client-side |
+| `tests/` | Unit, route, and fixture-based tests; no live network | Depend on Census or Zillow availability |
 
 ### 6.2 Provenance model
 
@@ -427,13 +455,13 @@ Every value in `analysis.property`, `analysis.assumptions`, and `analysis.metric
 | `PORT` | `5000` | Listen port (set by the host) |
 | `APP_ENV` | `development` | `production` disables debug-only behavior |
 | `CORS_ORIGINS` | empty (CORS off) | Comma-separated allowed origins; empty means same-origin only |
-| `PROPERTY_PROVIDER` | `disabled` | Selects the adapter; `disabled` forces the manual-entry path (FR-22) |
-| `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_READ_TIMEOUT_S` | `3` / `8` | §5.5 |
+| `GEOCODER` | `census` | `census` (default) or `disabled` (turns address lookup off) |
+| `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_READ_TIMEOUT_S` | `3` / `8` | §5.5 (Census Geocoder calls) |
 | `RATE_LIMIT` | `20/minute` | §5.5; empty disables (use only behind an edge limiter) |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
 | `APP_VERSION` | `dev` | Injected at build time (git SHA); returned by `/healthz` |
 
-No variable holds a secret in the initial release. A future licensed provider adds its key as a host-managed secret, never in the repository.
+No variable holds a secret. Any future keyed source (for example a free Census ACS key for county-level data) is added as a host-managed secret, never in the repository.
 
 ### 6.4 Deployment architecture
 
@@ -476,14 +504,15 @@ An address can be sensitive personal or location information even though the app
 
 ### Provider, licensing, and data-use concern
 
-The current code uses Redfin's unofficial public endpoints. The repository does not establish that this access is authorized for the planned use, stable, licensed for display/redistribution, or appropriate for production. Before public release or product claims based on these data:
+Data sources in use and their status (owner direction 2026-10-23: free public sources, no scraping):
 
-- Review provider terms and applicable data-use restrictions.
-- Confirm the right to retrieve, transform, display, cache, and attribute each data category.
-- Identify a supported provider or obtain legal/product approval for continued use.
-- Do not attempt to bypass access controls, rate limits, bot protections, or other provider restrictions.
+| Source | Use | Terms status |
+|---|---|---|
+| US Census Bureau Geocoder | Address → ZIP, state, county | US government data; free, no key. Be a polite client (timeouts, no bulk use). |
+| Zillow Research ZORI / ZHVI (public CSV downloads) | ZIP-level rent and home value, bundled as a snapshot | Published by Zillow Research for public use with attribution (shown in the app and in `sources`). **Release gate:** confirm the current terms for this deployment's use before wide public promotion or any commercial use. |
+| State tax/insurance tables | Estimates | Prototype constants of unknown provenance; labeled unverified. Replace with sourced data. |
 
-This is a release gate, not something engineering can resolve by coding around provider protections. If usage rights cannot be confirmed, disable the affected data integration and provide a user-entry or alternative-provider path.
+Not used, deliberately: Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
 
 ### Financial-content concern
 
@@ -542,24 +571,26 @@ The intent includes “recommendations,” target/max/walk-away prices, and “e
 
 Initial release is acceptable when:
 
-1. The root page is a functional, responsive and keyboard-accessible interface, not placeholder text.
-2. A valid address and valid assumptions can produce a normalized analysis when the provider returns sufficient data.
+1. The root page is a functional, responsive, keyboard-accessible interface whose only required input is an address.
+2. A valid address and valid assumptions produce rent and three prices (PITI break-even, all-in break-even, target) for a typical home and 1–4 bedrooms when area data exists.
 3. Ambiguous addresses require user selection; no arbitrary first candidate is silently analyzed.
-4. Missing required data or provider failure produces an explicit, recoverable error or a clearly labeled partial analysis; it never silently receives a fabricated property value.
-5. Each result value identifies whether it is retrieved, user-supplied, or estimated, and shows an applicable source/freshness or methodology.
-6. Operating expenses are separate from debt service; NOI and cap rate follow the definitions in this spec.
-7. Cash-on-cash return is withheld or qualified when the cash-invested denominator is incomplete.
-8. Recommendations are absent until criteria are documented, or are explicitly tied to user-set criteria and explained.
+4. A missing ZIP, ZIP without rent data, or geocoder failure produces an explicit error (or `needs_rates` request) and never a fabricated rent or default state.
+5. Each result value identifies whether it is public data, user-supplied, or estimated, and shows a source/as-of date or basis.
+6. PITI is shown separately from other costs; NOI and cap rate exclude debt service.
+7. Cash-on-cash return states that cash invested is the down payment only.
+8. Prices are framed as calculations from stated criteria (§5.2 Recommendation policy), with no verdict wording.
 9. Financial and data limitations are visible without obscuring the main result.
 10. User-facing errors contain no internal exception details or raw upstream content.
-11. CORS is appropriately restricted, upstream requests are bounded, and production uses HTTPS/Gunicorn.
-12. Tests cover calculation formulas, validation, route response shapes, and upstream error behavior.
+11. CORS is restricted, upstream requests are bounded, and production uses HTTPS.
+12. Tests cover calculation formulas (including solver round-trips and golden vectors), validation, route response shapes, and upstream error behavior.
 13. README and engineering guidance accurately describe the current application and setup.
-14. Provider usage approval and brand approval are recorded, or their absence is clearly treated as a deployment constraint.
-15. Delivery: CI is green and required on `main`; the container image builds and passes the smoke check; `GET /healthz` is 200; rollback has been rehearsed once and the runbook updated (OPS-01 … OPS-07).
+14. Data-source terms review and brand approval are recorded, or their absence is clearly treated as a deployment constraint.
+15. Delivery: CI is green and required on `main`; the container image builds and passes the smoke check; `GET /healthz` is 200; rollback has been rehearsed once (OPS-01 … OPS-07).
 16. Each defect `BD-01 … BD-09` in §2.1 has a regression test whose name cites its ID.
 
 ## 10. Risks, contradictions, and unresolved decisions
+
+> v0.3 note: rows about the Redfin integration, manual entry, and property-level facts are superseded by ADR-0005 (address-only, free public data). New risk: the bundled Zillow snapshot ages — rebuild it monthly with `scripts/update_market_data.py`.
 
 | Concern | Why it matters | Proposed handling / decision needed |
 |---|---|---|
@@ -595,13 +626,13 @@ Engineering may build to these without waiting. If the owner chooses differently
 
 | ID | Answers §11 | Proposed default | Rationale / what would change it |
 |---|---|---|---|
-| D-01 | #1 provider | Redfin adapter behind a `PropertyProvider` interface, **disabled in production** until terms are reviewed; manual entry (FR-22) is the fallback path | Legal review may force a different provider or manual-only |
-| D-02 | #2 scope | US addresses; single-family residential only; other property types return `INSUFFICIENT_DATA` with an explanation | Current code and README target single-family |
-| D-03 | #3 data quality | Price, beds, and state must be retrieved or user-entered; tax, insurance, and rent are labeled state-level estimates (low confidence); HOA absence qualifies the metric | Matches FR-09 and intent principles 1–2 |
-| D-04 | #4 rent source | Model estimate (§5.2) in P0, user override allowed once FR-17 exists; no claim of market calibration | Replaced by FR-14 multi-method estimate in P1 |
+| D-01 | #1 provider | **Revised 2026-10-23:** US Census Geocoder (address matching) + bundled Zillow Research ZIP snapshot (rent, home value); no Redfin, no scraping | Approved direction; Zillow terms gate in §7 |
+| D-02 | #2 scope | US addresses; area-level analysis for a typical home and 1–4 bedrooms (property type not determined) | Owner: address-only input |
+| D-03 | #3 data quality | Rent and home value are ZIP-level public data with as-of dates; tax and insurance are labeled low-confidence state averages unless entered; unknown HOA is flagged | FR-09 |
+| D-04 | #4 rent source | ZIP typical rent from Zillow ZORI; bedroom rows via a disclosed heuristic; optional user rent adjustment % | Replace heuristic with a permitted bedroom-level source (FR-14) |
 | D-05 | #5 financing | Default 20% down, 7.0% rate, 30-year term; user can change down payment and rate in P0; term selectable (15/20/30) in the API from P0 and in the UI from P1 | Bounds in §5.2 |
-| D-06 | #6 cash invested | Down payment only in P0; closing costs and reserves excluded and the exclusion is stated beside the metric | Add optional user-entered closing costs in P1 |
-| D-07 | #7 buy box | No default verdict. User criteria (min cash flow, min cap rate, min cash-on-cash) arrive with FR-17; until then, no recommendation field | Avoids implied investment advice (§7) |
+| D-06 | #6 cash invested | Down payment only; stated beside cash-on-cash | Add optional closing costs later |
+| D-07 | #7 buy box | **Revised 2026-10-23:** prices computed from the user's cash-flow goal (default $100/mo placeholder) with PITI break-even and all-in break-even reference prices; no BUY/PASS verdicts | Wording needs product/legal review (FR-11) |
 | D-08 | #8 deferred scope | Market snapshot, projections, and scores are not part of launch | FR-16, FR-18, FR-19 stay P1/P2 |
 | D-09 | #9 brand | Neutral fallback design tokens (§5.4) until a brand kit is supplied | Owner supplies assets |
 | D-10 | #10 review process | Pull-request review plus CI gates (OPS-01); privacy: no persistence, no address logging; accessibility target WCAG 2.2 AA | Organization may require a formal security or legal review before public launch |
@@ -618,8 +649,12 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | ADR-0002 | Keep Flask; server-rendered UI; no database or AI service | accepted (follows existing spec §3.2/§6) | engineering |
 | 2026-10-23 | ADR-0003 | Docker image on Render, CI-gated deploy | superseded for hosting by ADR-0004; Docker image retained | engineering |
 | 2026-10-23 | ADR-0004 | Deploy on Vercel | accepted (owner asked for Vercel) | owner |
-| 2026-10-23 | D-04 | Allow optional user-entered monthly rent override in P0 | proposed | — |
-| 2026-10-23 | D-01 | Provider ships disabled by default; manual entry (FR-22) is P0 | implemented, proposed | — |
+| 2026-10-23 | D-01 … D-10 | Owner approved the §11.1 defaults as written | approved | owner (chat) |
+| 2026-10-23 | P0-3 | Keep the neutral fallback design (superseded by the v0.3 redesign, still unbranded) | approved | owner (chat) |
+| 2026-10-23 | P0-4 | Privacy stance (nothing stored, addresses never logged, disclosure of the third party that receives the address) and the "no recommendation" wording as built | approved as built; re-review for v0.3 wording | owner (chat) |
+| 2026-10-23 | P0-1 | Owner first chose to enable the Redfin adapter, then directed address-only input from free public sources. Redfin adapter removed; Census + Zillow Research used (ADR-0005) | superseded by direction change | owner (chat) |
+| 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
+| 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
 
 ### Document roles
 
@@ -638,14 +673,14 @@ Maintained with `plan.md`. A requirement with no task is either deferred (P1/P2)
 |---|---|---|
 | FR-01 | 2.1 | Page renders; form works without JS |
 | FR-02 | 1.1, 1.2, 1.8 | Validation boundary tests; route tests |
-| FR-03 | 1.5, 1.8, 2.2 | Provider fixture with multiple candidates → `AMBIGUOUS_MATCH` |
-| FR-04 | 1.5, 1.7 | Provenance present on every retrieved field |
+| FR-03 | 1.5, 1.8, 2.2 | Geocoder fixture with several matches → `AMBIGUOUS_MATCH`; pick re-submits |
+| FR-04 | 1.5, 1.7 | Provenance and as-of on rent/value; bundled snapshot sanity test |
 | FR-05 | 1.2, 2.1 | Bounds tests; inputs preserved on error |
-| FR-06, FR-07 | 1.3, 2.3 | `golden_vectors.json` reproduced; debt service excluded from NOI |
+| FR-06, FR-07 | 1.3, 2.3, 4.1 | `golden_vectors.json` (financials and price vectors) reproduced; solver round-trips; PITI separate |
 | FR-08 | 1.3, 2.3 | Methodology text and units rendered |
 | FR-09 | 1.4, 1.6, 1.7 | Missing data ⇒ `unavailable`; BD-01/BD-02 regression tests |
 | FR-10 | 1.1, 1.5, 2.2 | Each error code mapped and shown |
-| FR-11 | 1.10 | No verdict without user criteria |
+| FR-11 | 1.10, 4.1 | Prices framed as calculations; no verdict fields or words |
 | FR-12 | 2.1, 2.3 | Disclaimer visible in page and results |
 | FR-13 | 2.5 | README matches tested behavior |
 | FR-14 … FR-20 | 3.2 … 3.7 | Scheduled later |

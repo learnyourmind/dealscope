@@ -23,7 +23,7 @@ from dealscope.errors import (
     RateLimited,
 )
 from dealscope.forms import form_to_payload
-from dealscope.provider import PropertyProvider, build_provider
+from dealscope.provider import Geocoder, MarketData, build_geocoder
 from dealscope.ratelimit import RateLimiter, parse_rate
 from dealscope.service import run_analysis
 
@@ -47,19 +47,23 @@ def _form_defaults() -> Dict[str, Any]:
         "down_payment_pct": V.DEFAULT_DOWN_PCT,
         "annual_interest_rate_pct": V.DEFAULT_RATE,
         "loan_term_years": V.DEFAULT_TERM,
+        "min_monthly_cash_flow": int(V.DEFAULT_MIN_CASH_FLOW),
     }
 
 
 def create_app(
-    config: Optional[Config] = None, provider: Optional[PropertyProvider] = None
+    config: Optional[Config] = None,
+    geocoder: Optional[Geocoder] = None,
+    market: Optional[MarketData] = None,
 ) -> Flask:
     config = config or Config.from_env()
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.max_body_bytes
     _configure_logging(config.log_level)
-    provider = provider or build_provider(
-        config.property_provider, config.connect_timeout_s, config.read_timeout_s
+    geocoder = geocoder or build_geocoder(
+        config.geocoder, config.connect_timeout_s, config.read_timeout_s
     )
+    market = market or MarketData()
     parsed_rate = parse_rate(config.rate_limit)
     limiter = RateLimiter(*parsed_rate) if parsed_rate else None
 
@@ -154,7 +158,7 @@ def create_app(
         return (
             render_template(
                 "index.html",
-                provider_enabled=provider.enabled,
+                lookup_enabled=geocoder.enabled,
                 bounds=V,
                 version=config.app_version,
                 **ctx,
@@ -168,7 +172,7 @@ def create_app(
             return _page()
         form = request.form.to_dict()
         try:
-            result = run_analysis(form_to_payload(form), provider, config.request_budget_s)
+            result = run_analysis(form_to_payload(form), geocoder, market, config.request_budget_s)
         except DealScopeError as err:
             g.error_code = err.code
             return _page(err.status, form=form, error=_error_body(err)["error"])
@@ -184,11 +188,11 @@ def create_app(
             raise InvalidRequest(
                 "The request body must be JSON with a Content-Type of application/json."
             )
-        return jsonify(run_analysis(payload, provider, config.request_budget_s))
+        return jsonify(run_analysis(payload, geocoder, market, config.request_budget_s))
 
     @app.route("/healthz")
     def healthz():
-        # Liveness only (spec FR-21): must never call the property provider.
+        # Liveness only (spec FR-21): must never call the geocoder.
         return jsonify({"status": "ok", "version": config.app_version})
 
     @app.template_filter("usd")

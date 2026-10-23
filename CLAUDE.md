@@ -24,7 +24,7 @@ If the spec is silent or contradictory, do not invent behavior: record an open q
 - `Procfile` — Gunicorn web process definition for Procfile-based platforms.
 - `Dockerfile` — portable production image (built and smoke-tested in CI). `.python-version`, `.vercelignore` — Vercel deployment (see [ADR-0004](./docs/adr/0004-deploy-on-vercel.md); Docker kept for portability, see ADR-0003).
 - `ruff.toml`, `pytest.ini`, `.coveragerc`, `Makefile` — lint/test/coverage configuration and the `make` entry points below. Do **not** add a `pyproject.toml`: Vercel would install from it and skip `requirements.txt` (ADR-0004).
-- `tests/` — pytest suite (validation, analysis against the golden vectors in `tests/fixtures/golden_vectors.json`, provider adapter with synthetic payloads, API and UI routes). No live network.
+- `tests/` — pytest suite (validation, analysis against the golden financial and price vectors in `tests/fixtures/golden_vectors.json`, Census adapter with synthetic payloads, bundled-data sanity, API and UI routes). No live network. `--confcutdir=tests` in `pytest.ini` keeps pytest from scanning the repo root.
 - `.github/` — CI (`ci.yml`), post-deploy smoke workflow, Dependabot, PR and task templates.
 - `docs/` — `ai-sdlc.md`, `runbook.md` (deploy, rollback), `adr/` (architecture decisions).
 - `scripts/smoke.sh` — post-deploy check (`/healthz` and `/` must return 200).
@@ -34,15 +34,15 @@ There is no database, cache, or separate frontend build. Do not assume these exi
 
 ## Implemented baseline and documentation gap
 
-Shipped (see `plan.md` for status):
+Shipped (see `plan.md` for status; direction per ADR-0005):
 
-- `app.py` — `create_app()` factory (module-level `app` for Gunicorn/Vercel): `GET/POST /` (server-rendered form and results), `POST /analyze` (JSON API), `GET /healthz`; error envelope, request IDs, structured logging without addresses, optional CORS, per-process rate limit.
-- `dealscope/` — `validation.py` (bounds), `analysis.py` (pure calculations + provenance), `assumptions.py` (state tables, defaults), `provider.py` (provider interface, disabled default, Redfin adapter), `service.py`, `errors.py`, `config.py`, `ratelimit.py`, `forms.py`.
-- `templates/index.html`, `static/` — accessible no-JS-required UI (JS only prevents double submit and moves focus).
-- Every value is classified `retrieved | user | estimate | unavailable`. No BUY/CAUTION verdict is produced (spec D-07).
-- The property-data provider is **disabled by default** (`PROPERTY_PROVIDER=disabled`): users enter price, bedrooms, and state. The Redfin adapter is written against *unverified* payload shapes and tested only with synthetic fixtures; enabling it needs the terms review in plan P0-1.
+- `app.py` — `create_app()` factory (module-level `app` for Gunicorn/Vercel): `GET/POST /` (server-rendered page), `POST /analyze` (JSON API), `GET /healthz`; error envelope, request IDs, structured logging without addresses, optional CORS, per-process rate limit.
+- `dealscope/` — `validation.py` (bounds; address is the only required input), `provider.py` (Census Geocoder + bundled ZIP market data), `analysis.py` (financials, closed-form price solver, provenance), `assumptions.py` (state tax/insurance tables, bedroom factors), `service.py`, `errors.py`, `config.py`, `ratelimit.py`, `forms.py`.
+- `data/zip_market.json` — Zillow Research ZIP rent/home-value snapshot, rebuilt by `scripts/update_market_data.py` (never hand-edit).
+- `templates/index.html`, `static/` — dark/light, no-JS-required UI; no third-party requests.
+- Every value is classified `retrieved | user | estimate | unavailable`. No BUY/PASS verdicts: prices are calculations from the user's criteria.
 
-Not shipped (aspirational, from the README): market snapshots, price history, comparable sales, multi-method rent estimates, projections, investor scores, risks/opportunities, buy-box pricing. Tax, insurance, and rent use rough state-level constants that were carried over unverified.
+Not shipped: property-level facts (no free licensed source), comps, price history, projections, scores, county-level tax. Tax and insurance use unverified state-average constants; bedroom rents use a heuristic. Manual entry of price/bedrooms and the Redfin adapter were removed (owner direction).
 
 When changing functionality, distinguish clearly between what is implemented and what is aspirational. Update the README whenever the shipped behavior or setup instructions change.
 
@@ -62,8 +62,8 @@ For each feature or fix:
 
 - Use Python and the existing Flask application unless the task calls for a deliberate architectural change.
 - Keep analysis outputs JSON-serializable and preserve the existing `success`/`error` response convention unless changing it intentionally and consistently.
-- Treat Redfin endpoints as unofficial and potentially unavailable or changed. Use bounded network timeouts, check HTTP status, and handle expected upstream failures explicitly when modifying network access.
-- Keep regional rates and rent assumptions identifiable as estimates. Avoid implying that state-level averages are property-specific or current quotes.
+- Only use free public data sources whose terms permit the use; never scrape listing sites or use unofficial endpoints without a terms review. Use bounded network timeouts, check HTTP status, and handle expected upstream failures explicitly when modifying network access.
+- Keep regional rates and rent assumptions identifiable as estimates. Avoid implying that ZIP- or state-level figures are property-specific or current quotes.
 - Do not add API keys or credentials to the repository. If a future provider requires credentials, use environment configuration and document setup without recording secrets.
 - CORS is off unless `CORS_ORIGINS` lists origins (and then applies to `POST /analyze` only). The dev server binds to `127.0.0.1` unless `HOST` is set. Consider the security and deployment implications before expanding exposure or accepting new kinds of input.
 - `requirements.txt` is the dependency manifest. Keep local startup scripts consistent with it when changing dependencies.

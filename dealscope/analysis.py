@@ -1,15 +1,17 @@
 """Deterministic financial analysis with provenance (spec §5.2, §6.2).
 
-`compute_financials` is pure numeric code reproduced by tests/fixtures/golden_vectors.json.
-`build_analysis` wraps it in the provenance model: every value says whether it was
-retrieved, entered by the user, estimated, or is unavailable.
+`compute_financials` and `max_purchase_price` are pure numeric code (golden vectors in
+tests/fixtures/golden_vectors.json). `build_analysis` wraps them in the provenance model:
+every value says whether it was retrieved, entered by the user, estimated, or is unavailable.
 """
 
-from dataclasses import dataclass
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from . import assumptions as A
+from .errors import InsufficientData
+from .provider import Location, ZipMarket
 from .validation import AnalysisRequest
 
 # ── Pure calculations ────────────────────────────────────────────────────────
@@ -71,253 +73,417 @@ def compute_financials(
     return {key: round(value, 2) for key, value in values.items()}
 
 
+def _rate_coefficient(
+    down_payment_pct: float,
+    annual_interest_rate_pct: float,
+    loan_term_years: int,
+    property_tax_rate_pct: float,
+    insurance_rate_pct: float,
+    capex_pct: float,
+) -> float:
+    """Monthly cost per $1 of purchase price: P&I on the loan + tax + insurance (+ CapEx)."""
+    k = monthly_payment(1.0, annual_interest_rate_pct, loan_term_years)
+    return (property_tax_rate_pct + insurance_rate_pct + capex_pct) / 1200 + (
+        1 - down_payment_pct / 100
+    ) * k
+
+
+def max_purchase_price(
+    *,
+    gross_monthly_rent: float,
+    down_payment_pct: float,
+    annual_interest_rate_pct: float,
+    loan_term_years: int,
+    property_tax_rate_pct: float,
+    insurance_rate_pct: float,
+    hoa_monthly: float = 0.0,
+    min_monthly_cash_flow: float = 0.0,
+    include_operating_costs: bool = True,
+    vacancy_pct: float = A.VACANCY_PCT,
+    management_pct: float = A.MANAGEMENT_PCT,
+    capex_reserve_pct_of_price_per_year: float = A.CAPEX_PCT_OF_PRICE_PER_YEAR,
+) -> Optional[float]:
+    """Highest purchase price whose monthly cash flow is at least `min_monthly_cash_flow`.
+
+    Every cost except HOA scales linearly with price, so the answer is closed-form:
+        cash_flow(P) = rent·(1 − vac − mgmt) − HOA − P·coefficient
+    With `include_operating_costs=False` only mortgage P&I, tax, insurance (PITI) and HOA are
+    deducted. Returns None when no positive price meets the target (rent too low).
+    """
+    income = gross_monthly_rent
+    capex = 0.0
+    if include_operating_costs:
+        income *= 1 - (vacancy_pct + management_pct) / 100
+        capex = capex_reserve_pct_of_price_per_year
+    numerator = income - hoa_monthly - min_monthly_cash_flow
+    coefficient = _rate_coefficient(
+        down_payment_pct,
+        annual_interest_rate_pct,
+        loan_term_years,
+        property_tax_rate_pct,
+        insurance_rate_pct,
+        capex,
+    )
+    if numerator <= 0 or coefficient <= 0:
+        return None
+    return numerator / coefficient
+
+
+def floor_price(price: Optional[float], step: int = 1000) -> Optional[int]:
+    """Round down so the stated price never overstates what the assumptions support."""
+    if price is None or not math.isfinite(price):
+        return None
+    floored = int(math.floor(price / step) * step)
+    return floored if floored >= step else None
+
+
+def monthly_view(
+    *,
+    price: float,
+    gross_monthly_rent: float,
+    down_payment_pct: float,
+    annual_interest_rate_pct: float,
+    loan_term_years: int,
+    property_tax_rate_pct: float,
+    insurance_rate_pct: float,
+    hoa_monthly: float,
+    include_operating_costs: bool,
+) -> Dict[str, float]:
+    """Monthly picture at a given price: PITI first, then other costs, then cash flow."""
+    pi = monthly_payment(
+        price * (1 - down_payment_pct / 100), annual_interest_rate_pct, loan_term_years
+    )
+    tax = price * property_tax_rate_pct / 100 / 12
+    ins = price * insurance_rate_pct / 100 / 12
+    vacancy = management = capex = 0.0
+    if include_operating_costs:
+        vacancy = gross_monthly_rent * A.VACANCY_PCT / 100
+        management = gross_monthly_rent * A.MANAGEMENT_PCT / 100
+        capex = price * A.CAPEX_PCT_OF_PRICE_PER_YEAR / 100 / 12
+    piti = pi + tax + ins
+    other = hoa_monthly + vacancy + management + capex
+    values = {
+        "gross_rent": gross_monthly_rent,
+        "principal_interest": pi,
+        "property_tax": tax,
+        "insurance": ins,
+        "piti_total": piti,
+        "hoa": hoa_monthly,
+        "vacancy": vacancy,
+        "management": management,
+        "capex_reserve": capex,
+        "other_costs_total": other,
+        "cash_flow": gross_monthly_rent - piti - other,
+        "down_payment": price * down_payment_pct / 100,
+    }
+    return {k: round(v, 2) for k, v in values.items()}
+
+
 # ── Provenance model ─────────────────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class Fact:
-    value: Any
-    kind: str  # "retrieved" | "user"
-    source: str
-    retrieved_at: Optional[str] = None
+def _fact(value: Any, unit: Optional[str], kind: str, **extra: Any) -> Dict[str, Any]:
+    return {"value": value, "unit": unit, "kind": kind, **extra}
 
 
-@dataclass(frozen=True)
-class PropertyFacts:
-    address: Fact
-    price: Optional[Fact] = None
-    beds: Optional[Fact] = None
-    state: Optional[Fact] = None
-    sqft: Optional[Fact] = None
-    hoa_monthly: Optional[Fact] = None
-    property_type: Optional[Fact] = None
-
-
-def _fact_json(
-    fact: Optional[Fact], unit: Optional[str] = None, reason: str = "Not provided"
-) -> Dict:
-    if fact is None:
-        return {"kind": "unavailable", "reason": reason, "unit": unit}
-    out = {"value": fact.value, "kind": fact.kind, "source": fact.source, "unit": unit}
-    if fact.retrieved_at:
-        out["retrieved_at"] = fact.retrieved_at
-    return out
-
-
-def _estimate(value: Any, unit: str, basis: str, confidence: str = "low") -> Dict:
-    return {
-        "value": value,
-        "unit": unit,
-        "kind": "estimate",
-        "basis": basis,
-        "confidence": confidence,
-    }
-
-
-def _user(value: Any, unit: str) -> Dict:
-    return {"value": value, "unit": unit, "kind": "user", "source": "You entered this"}
-
-
-def _unavailable(reason: str, unit: Optional[str] = None) -> Dict:
+def _unavailable(reason: str, unit: Optional[str] = None) -> Dict[str, Any]:
     return {"kind": "unavailable", "reason": reason, "unit": unit}
 
 
-def missing_required(facts: PropertyFacts) -> List[str]:
-    return [name for name in ("price", "beds", "state") if getattr(facts, name) is None]
+SCENARIOS = (
+    ("typical", "Typical home in this ZIP", None),
+    ("1br", "1 bedroom", 1),
+    ("2br", "2 bedrooms", 2),
+    ("3br", "3 bedrooms", 3),
+    ("4br", "4 bedrooms", 4),
+)
+
+PRICE_DEFS = (
+    (
+        "piti_breakeven",
+        False,
+        "zero",
+        "Rent covers principal, interest, tax and insurance (PITI) exactly",
+    ),
+    (
+        "allin_breakeven",
+        True,
+        "zero",
+        "Cash flow is $0 after PITI, vacancy, management and maintenance reserve",
+    ),
+    (
+        "target",
+        True,
+        "target",
+        "Cash flow meets your monthly minimum after PITI and the other costs",
+    ),
+)
 
 
-def build_analysis(req: AnalysisRequest, facts: PropertyFacts) -> Dict[str, Any]:
-    """Assumes `missing_required(facts)` is empty."""
-    price = float(facts.price.value)
-    beds = int(facts.beds.value)
-    state = str(facts.state.value)
-    hoa_known = facts.hoa_monthly is not None
-    hoa = float(facts.hoa_monthly.value) if hoa_known else 0.0
-
-    tax_rate = A.TAX_RATES[state]
-    ins_rate = A.INS_RATES[state]
-    tax_basis = f"{state} state-average effective tax rate {tax_rate}% × price ÷ 12. {A.SOURCE}."
-    ins_basis = f"{state} state-average insurance rate {ins_rate}% × price ÷ 12. {A.SOURCE}."
-
-    # Rent: user value wins; otherwise a documented estimate; otherwise unavailable.
-    rent_json: Dict
-    if req.monthly_rent is not None:
-        rent = float(req.monthly_rent)
-        rent_json = _user(rent, "USD/month")
+def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) -> Dict[str, Any]:
+    """Assumes the caller verified that `market.rent` exists."""
+    state = location.state or market.state
+    tax_rate = req.property_tax_rate_pct
+    ins_rate = req.insurance_rate_pct
+    tax_fact: Dict[str, Any]
+    ins_fact: Dict[str, Any]
+    if tax_rate is not None:
+        tax_fact = _fact(tax_rate, "%/year", "user", source="You entered this")
+    elif state in A.TAX_RATES:
+        tax_rate = A.TAX_RATES[state]
+        tax_fact = _fact(
+            tax_rate,
+            "%/year",
+            "estimate",
+            confidence="low",
+            basis=f"{state} state-average effective property tax rate. {A.SOURCE}.",
+        )
     else:
-        est = A.estimate_rent(price, beds, state)
-        if est is None:
-            rent = None
-            rent_json = _unavailable(
-                f"No rent benchmark for {beds}-bedroom homes; enter your own rent estimate.",
-                "USD/month",
-            )
+        tax_fact = _unavailable(
+            "No state-average tax rate for this location; enter one under advanced assumptions.",
+            "%/year",
+        )
+    if ins_rate is not None:
+        ins_fact = _fact(ins_rate, "%/year", "user", source="You entered this")
+    elif state in A.INS_RATES:
+        ins_rate = A.INS_RATES[state]
+        ins_fact = _fact(
+            ins_rate,
+            "%/year",
+            "estimate",
+            confidence="low",
+            basis=f"{state} state-average homeowners insurance rate. {A.SOURCE}.",
+        )
+    else:
+        ins_fact = _unavailable(
+            "No state-average insurance rate for this location; "
+            "enter one under advanced assumptions.",
+            "%/year",
+        )
+    if tax_rate is None or ins_rate is None:
+        raise InsufficientData(
+            "We don't have state-average tax or insurance rates for this location. "
+            "Enter both under Advanced assumptions to continue.",
+            missing=["property_tax_rate_pct", "insurance_rate_pct"],
+            needs_rates=True,
+        )
+
+    hoa_known = req.hoa_monthly is not None
+    hoa = req.hoa_monthly or 0.0
+    adj = req.rent_adjustment_pct
+    typical_rent = market.rent * (1 + adj / 100)
+    rent_source = f"{market.rent_source}, ZIP {market.zip}, {market.rent_as_of}"
+    common = dict(
+        down_payment_pct=req.down_payment_pct,
+        annual_interest_rate_pct=req.annual_interest_rate_pct,
+        loan_term_years=req.loan_term_years,
+        property_tax_rate_pct=tax_rate,
+        insurance_rate_pct=ins_rate,
+    )
+
+    scenarios: List[Dict[str, Any]] = []
+    for key, label, beds in SCENARIOS:
+        if beds is None:
+            rent = typical_rent
+            if adj == 0:
+                rent_fact = _fact(
+                    round(rent),
+                    "USD/month",
+                    "retrieved",
+                    source=rent_source,
+                    basis="Typical observed rent across home sizes in the ZIP; "
+                    "not this property's rent.",
+                )
+            else:
+                rent_fact = _fact(
+                    round(rent),
+                    "USD/month",
+                    "estimate",
+                    confidence="low",
+                    basis=f"{rent_source} adjusted by your {adj:+g}%.",
+                )
         else:
-            rent = float(est[0])
-            rent_json = _estimate(est[0], "USD/month", est[1])
-
-    down_pct = req.down_payment_pct
-    down = price * down_pct / 100
-    loan = price - down
-    pi = monthly_payment(loan, req.annual_interest_rate_pct, req.loan_term_years)
-
-    tax = price * tax_rate / 100 / 12
-    ins = price * ins_rate / 100 / 12
-    capex = price * A.CAPEX_PCT_OF_PRICE_PER_YEAR / 100 / 12
-
-    financing = {
-        "down_payment": _estimate(round(down, 2), "USD", f"Price × {down_pct:g}% down payment"),
-        "loan_amount": _estimate(round(loan, 2), "USD", "Price − down payment"),
-        "monthly_principal_interest": _estimate(
-            round(pi, 2),
-            "USD/month",
-            f"Level payment, {req.annual_interest_rate_pct:g}% nominal annual rate, "
-            f"{req.loan_term_years}-year term. Not a lender quote.",
-        ),
-    }
-    breakdown: Dict[str, Dict] = {
-        "gross_rent": rent_json,
-        "property_tax": _estimate(round(tax, 2), "USD/month", tax_basis),
-        "insurance": _estimate(round(ins, 2), "USD/month", ins_basis),
-        "hoa": _fact_json(
-            facts.hoa_monthly,
-            "USD/month",
-            "HOA fee not available; treated as $0 in totals and flagged",
-        ),
-        "capex_reserve": _estimate(
-            round(capex, 2),
-            "USD/month",
-            f"{A.CAPEX_PCT_OF_PRICE_PER_YEAR:g}% of price per year ÷ 12 "
-            "(maintenance/CapEx reserve)",
-        ),
-    }
-
-    metrics: Dict[str, Dict] = {}
-    if rent is None:
-        reason = "Rent is unavailable, so income-based metrics cannot be calculated."
-        for key, unit in (
-            ("vacancy", "USD/month"),
-            ("management", "USD/month"),
-            ("operating_expenses_total", "USD/month"),
-        ):
-            breakdown[key] = _unavailable(reason, unit)
-        for key, unit in (
-            ("monthly_noi", "USD/month"),
-            ("monthly_cash_flow", "USD/month"),
-            ("cap_rate_pct", "%"),
-            ("cash_on_cash_pct", "%"),
-        ):
-            metrics[key] = _unavailable(reason, unit)
-    else:
-        calc = compute_financials(
-            purchase_price=price,
-            down_payment_pct=down_pct,
-            annual_interest_rate_pct=req.annual_interest_rate_pct,
-            loan_term_years=req.loan_term_years,
-            gross_monthly_rent=rent,
-            property_tax_rate_pct=tax_rate,
-            insurance_rate_pct=ins_rate,
-            hoa_monthly=hoa,
-        )
-        breakdown["vacancy"] = _estimate(
-            calc["monthly_vacancy"], "USD/month", f"{A.VACANCY_PCT:g}% of gross monthly rent"
-        )
-        breakdown["management"] = _estimate(
-            calc["monthly_management"], "USD/month", f"{A.MANAGEMENT_PCT:g}% of gross monthly rent"
-        )
-        breakdown["operating_expenses_total"] = _estimate(
-            calc["monthly_operating_expenses"],
-            "USD/month",
-            "Tax + insurance + HOA + CapEx reserve + vacancy + management. Excludes debt service.",
-        )
-        qualifier = (
-            {}
-            if hoa_known
-            else {
-                "qualified": True,
-                "missing_inputs": ["hoa_monthly"],
-                "note": "HOA was unavailable and counted as $0; "
-                "a real HOA fee would lower this result.",
+            rent = typical_rent * A.BEDROOM_RENT_FACTORS[beds]
+            rent_fact = _fact(
+                round(rent),
+                "USD/month",
+                "estimate",
+                confidence="low",
+                basis=f"{A.BEDROOM_FACTOR_BASIS} Base: {rent_source}.",
+            )
+        prices: Dict[str, Any] = {}
+        views: Dict[str, Any] = {}
+        for pkey, include_op, mode, note in PRICE_DEFS:
+            raw = max_purchase_price(
+                gross_monthly_rent=rent,
+                hoa_monthly=hoa,
+                min_monthly_cash_flow=req.min_monthly_cash_flow if mode == "target" else 0.0,
+                include_operating_costs=include_op,
+                **common,
+            )
+            price = floor_price(raw)
+            if price is None:
+                prices[pkey] = _unavailable(
+                    "Rent is too low to meet this target at any purchase price.", "USD"
+                )
+                continue
+            prices[pkey] = _fact(
+                price,
+                "USD",
+                "estimate",
+                confidence="low",
+                basis=note + ". Rounded down to the nearest $1,000.",
+            )
+            views[pkey] = monthly_view(
+                price=price,
+                gross_monthly_rent=rent,
+                hoa_monthly=hoa,
+                include_operating_costs=include_op,
+                **common,
+            )
+        target_price = prices["target"].get("value")
+        extras: Dict[str, Any] = {}
+        if target_price:
+            fin = compute_financials(
+                purchase_price=target_price,
+                gross_monthly_rent=rent,
+                hoa_monthly=hoa,
+                **common,
+            )
+            extras = {
+                "cap_rate_pct": fin["cap_rate_pct"],
+                "cash_on_cash_pct": fin["cash_on_cash_pct"],
+            }
+            if market.home_value:
+                extras["pct_of_zip_home_value"] = round(target_price / market.home_value * 100)
+        scenarios.append(
+            {
+                "key": key,
+                "label": label,
+                "beds": beds,
+                "rent": rent_fact,
+                "prices": prices,
+                "monthly_at_price": views,
+                "at_target": extras,
             }
         )
-        coc_note = (
-            "Cash invested is the down payment only; closing costs and reserves are not included."
-        )
-        metrics["monthly_noi"] = {
-            **_estimate(
-                calc["monthly_noi"],
-                "USD/month",
-                "Income after vacancy − operating expenses; excludes principal and interest",
-            ),
-            **qualifier,
-        }
-        metrics["monthly_cash_flow"] = {
-            **_estimate(calc["monthly_cash_flow"], "USD/month", "NOI − principal and interest"),
-            **qualifier,
-        }
-        metrics["cap_rate_pct"] = {
-            **_estimate(calc["cap_rate_pct"], "%", "Annual NOI ÷ purchase price × 100"),
-            **qualifier,
-        }
-        metrics["cash_on_cash_pct"] = {
-            **_estimate(
-                calc["cash_on_cash_pct"],
-                "%",
-                "Annual pre-tax cash flow ÷ down payment × 100. " + coc_note,
-            ),
-            **qualifier,
-        }
 
-    assumptions_json = {
-        "down_payment_pct": _user(down_pct, "%"),
-        "annual_interest_rate_pct": _user(req.annual_interest_rate_pct, "%"),
-        "loan_term_years": _user(req.loan_term_years, "years"),
-        "vacancy_pct": _estimate(
-            A.VACANCY_PCT, "%", "Default assumption; not property-specific", "low"
+    qualifier = (
+        {}
+        if hoa_known
+        else {
+            "qualified": True,
+            "note": "HOA is unknown and counted as $0. A real HOA fee lowers every price shown.",
+        }
+    )
+    assumptions = {
+        "down_payment_pct": _fact(req.down_payment_pct, "%", "user", source="You entered this"),
+        "annual_interest_rate_pct": _fact(
+            req.annual_interest_rate_pct, "%", "user", source="You entered this"
         ),
-        "management_pct": _estimate(
-            A.MANAGEMENT_PCT, "%", "Default assumption; not property-specific", "low"
+        "loan_term_years": _fact(req.loan_term_years, "years", "user", source="You entered this"),
+        "min_monthly_cash_flow": _fact(
+            req.min_monthly_cash_flow, "USD/month", "user", source="You entered this"
         ),
-        "property_tax_rate_pct": _estimate(tax_rate, "%/year", tax_basis),
-        "insurance_rate_pct": _estimate(ins_rate, "%/year", ins_basis),
+        "rent_adjustment_pct": _fact(adj, "%", "user", source="You entered this"),
+        "property_tax_rate_pct": tax_fact,
+        "insurance_rate_pct": ins_fact,
+        "hoa_monthly": (
+            _fact(hoa, "USD/month", "user", source="You entered this")
+            if hoa_known
+            else _unavailable("Unknown; counted as $0 and flagged", "USD/month")
+        ),
+        "vacancy_pct": _fact(
+            A.VACANCY_PCT,
+            "%",
+            "estimate",
+            confidence="low",
+            basis="Default assumption; not property-specific",
+        ),
+        "management_pct": _fact(
+            A.MANAGEMENT_PCT,
+            "%",
+            "estimate",
+            confidence="low",
+            basis="Default assumption; not property-specific",
+        ),
+        "capex_reserve_pct": _fact(
+            A.CAPEX_PCT_OF_PRICE_PER_YEAR,
+            "% of price/year",
+            "estimate",
+            confidence="low",
+            basis="Maintenance/CapEx reserve default; not property-specific",
+        ),
+    }
+
+    market_json = {
+        "zip": market.zip,
+        "typical_rent": scenarios[0]["rent"],
+        "typical_home_value": (
+            _fact(
+                round(market.home_value),
+                "USD",
+                "retrieved",
+                source=f"{market.value_source}, ZIP {market.zip}, {market.value_as_of}",
+                basis="Typical value of single-family homes and condos in the ZIP; "
+                "not this property's value.",
+            )
+            if market.home_value
+            else _unavailable("No home-value index for this ZIP", "USD")
+        ),
     }
 
     limitations = [
-        "For information only. This is not financial, tax, legal, insurance, appraisal, "
-        "or lending advice, "
-        "and it does not predict returns.",
-        "Property tax and insurance use state-average rates, not quotes for this property. "
-        "Verify both locally.",
-        "Rent, vacancy, management, and CapEx are model assumptions. "
-        "Verify rents with local listings.",
-        "Cash-on-cash return counts the down payment only; "
-        "closing costs and reserves are excluded.",
-        "No investment recommendation is made. Compare the figures with your own criteria.",
+        "For information only. This is not financial, tax, legal, insurance, appraisal, or lending "
+        "advice, and it does not predict returns.",
+        "Prices are the most you could pay for the stated cash flow under these assumptions. They "
+        "are not an appraisal, a listing price, or a forecast of what the property will sell for.",
+        "Rent is a ZIP-level typical rent across all home sizes, not a quote for a specific "
+        "property. Bedroom rows scale it with a rough heuristic. Check local listings.",
+        "Property tax and insurance use state averages unless you entered rates. Actual bills "
+        "vary by county, assessment, and property.",
+        "Vacancy, management, and maintenance reserve are default assumptions.",
+        "Property facts such as bedroom count, size, condition, and county assessor records are "
+        "not retrieved; no free national source is available for them.",
     ]
     if not hoa_known:
-        limitations.append("HOA fees were unavailable and counted as $0; results are qualified.")
-    if facts.price.kind == "user":
-        limitations.append(
-            "Price, bedrooms, and state were entered by you and have not been verified."
-        )
-    if rent is None:
-        limitations.append(
-            "Rent could not be estimated; enter your own monthly rent to calculate metrics."
-        )
+        limitations.append("HOA fees are unknown and counted as $0; results are qualified.")
 
     return {
-        "property": {
-            "address": _fact_json(facts.address),
-            "purchase_price": _fact_json(facts.price, "USD"),
-            "beds": _fact_json(facts.beds, "bedrooms"),
-            "state": _fact_json(facts.state),
-            "sqft": _fact_json(facts.sqft, "sq ft"),
-            "property_type": _fact_json(facts.property_type),
+        "location": {
+            "address": _fact(
+                location.address, None, "retrieved", source="US Census Bureau Geocoder"
+            ),
+            "zip": market.zip,
+            "state": state,
+            "county": location.county,
         },
-        "assumptions": assumptions_json,
-        "financing": financing,
-        "breakdown": breakdown,
-        "metrics": metrics,
+        "market": market_json,
+        "assumptions": assumptions,
+        "scenarios": scenarios,
+        "qualifier": qualifier,
         "limitations": limitations,
+        "sources": [
+            {
+                "name": "US Census Bureau Geocoder",
+                "url": "https://geocoding.geo.census.gov/",
+                "used_for": "Address matching, ZIP, state, county",
+            },
+            {
+                "name": market.rent_source,
+                "url": "https://www.zillow.com/research/data/",
+                "used_for": f"Typical rent ({market.rent_as_of})",
+            },
+            {
+                "name": market.value_source,
+                "url": "https://www.zillow.com/research/data/",
+                "used_for": f"Typical home value ({market.value_as_of})",
+            },
+            {
+                "name": "State-average tax and insurance tables (prototype constants, unverified)",
+                "url": None,
+                "used_for": "Property tax and insurance estimates",
+            },
+        ],
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

@@ -1,21 +1,22 @@
-"""Property-data provider boundary (spec FR-03, FR-04, FR-10, §5.5).
+"""Data sources behind replaceable boundaries (spec FR-03, FR-04, FR-10, §5.5, §6.1).
 
-Calculations never see vendor JSON: adapters return normalized `PropertyFacts`.
-The Redfin adapter targets an UNOFFICIAL endpoint whose use is pending terms review
-(spec §7, plan P0-1), so the app ships with the provider disabled. Field paths below
-are unverified against the live service and exercised only with synthetic fixtures.
+* Geocoding: US Census Bureau Geocoder (free, no key, US government data).
+* Area rent and home value: bundled snapshot of Zillow Research's public ZIP-level indexes,
+  rebuilt by scripts/update_market_data.py (free, attribution shown in the app).
+
+There is no free national API for county assessor records, and Redfin/Zillow listing pages are
+not licensed for this use, so property-level facts (price, beds, sqft) are not retrieved.
 """
 
 import json
-import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from .analysis import Fact, PropertyFacts
 from .errors import (
     InsufficientData,
     ProviderRateLimited,
@@ -25,61 +26,53 @@ from .errors import (
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CANDIDATES = 5
-_USER_AGENT = "DealScope/0.1 (+first-pass analysis tool)"
+_USER_AGENT = "DealScope/0.2 (first-pass rental analysis)"
+CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "zip_market.json"
+GEOCODER_SOURCE = "US Census Bureau Geocoder"
 
 
 @dataclass(frozen=True)
-class Candidate:
-    id: str
-    display: str
+class Location:
+    address: str  # standardized by the geocoder
+    zip: Optional[str]
+    state: Optional[str]
+    county: Optional[str]
 
-    def to_dict(self) -> Dict[str, str]:
-        return {"id": self.id, "display": self.display}
+    def to_candidate(self) -> Dict[str, str]:
+        return {"id": self.address, "display": self.address}
 
 
-class PropertyProvider:
+@dataclass(frozen=True)
+class ZipMarket:
+    zip: str
+    state: Optional[str]
+    rent: Optional[float]
+    home_value: Optional[float]
+    rent_as_of: str
+    value_as_of: str
+    rent_source: str
+    value_source: str
+
+
+class Geocoder:
     name = "base"
     enabled = True
 
-    def search(self, address: str, deadline: Optional[float] = None) -> List[Candidate]:
-        raise NotImplementedError
-
-    def get_property(self, candidate: Candidate, deadline: Optional[float] = None) -> PropertyFacts:
+    def geocode(self, address: str, deadline: Optional[float] = None) -> List[Location]:
         raise NotImplementedError
 
 
-class DisabledProvider(PropertyProvider):
+class DisabledGeocoder(Geocoder):
     name = "disabled"
     enabled = False
 
-    def search(self, address, deadline=None):
-        raise InsufficientData(
-            "Automatic property lookup is turned off. Enter the price, bedrooms, and state.",
-            missing=["price", "beds", "state"],
-            manual_entry_required=True,
-        )
-
-    def get_property(self, candidate, deadline=None):  # pragma: no cover - never reached
-        return self.search(candidate.display)
+    def geocode(self, address, deadline=None):
+        raise ProviderUnavailable("Address lookup is turned off in this deployment.")
 
 
-def _dig(obj: Any, *keys: str) -> Any:
-    for key in keys:
-        if not isinstance(obj, dict):
-            return None
-        obj = obj.get(key)
-    return obj
-
-
-def _positive_number(value: Any) -> Optional[float]:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value) if value > 0 else None
-
-
-class RedfinProvider(PropertyProvider):
-    name = "redfin"
-    base = "https://www.redfin.com/stingray"
+class CensusGeocoder(Geocoder):
+    name = "census"
 
     def __init__(
         self,
@@ -91,8 +84,7 @@ class RedfinProvider(PropertyProvider):
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": _USER_AGENT})
 
-    # ── transport ────────────────────────────────────────────────────────────
-    def _get_json(self, path: str, params: Dict[str, Any], deadline: Optional[float]) -> Dict:
+    def _get_json(self, params: Dict[str, Any], deadline: Optional[float]) -> Dict:
         connect, read = self.timeouts
         if deadline is not None:
             remaining = deadline - time.monotonic()
@@ -100,12 +92,11 @@ class RedfinProvider(PropertyProvider):
                 raise ProviderTimeout()
             read = min(read, remaining)
         try:
-            resp = self.session.get(f"{self.base}{path}", params=params, timeout=(connect, read))
+            resp = self.session.get(CENSUS_GEOCODER, params=params, timeout=(connect, read))
         except requests.Timeout:
             raise ProviderTimeout() from None
         except requests.RequestException:
             raise ProviderUnavailable() from None
-
         status = resp.status_code
         if status in (403, 429):
             raise ProviderRateLimited()
@@ -114,109 +105,92 @@ class RedfinProvider(PropertyProvider):
         body = resp.content or b""
         if len(body) > MAX_RESPONSE_BYTES:
             raise ProviderUnavailable()
-        text = body.decode("utf-8", errors="replace")
-        if text.startswith("{}&&"):
-            text = text[4:]
         try:
-            data = json.loads(text)
+            data = json.loads(body.decode("utf-8", errors="replace"))
         except ValueError:
             raise ProviderUnavailable() from None
         if not isinstance(data, dict):
             raise ProviderUnavailable()
         return data
 
-    # ── search ───────────────────────────────────────────────────────────────
-    @staticmethod
-    def _property_id(row: Dict[str, Any]) -> Optional[str]:
-        raw = str(row.get("id", ""))
-        if ";" in raw:
-            raw = raw.split(";")[0]
-        match = re.search(r"/home/(\d{1,12})", str(row.get("url", "")))
-        if match:
-            return match.group(1)
-        digits = re.search(r"(\d{1,12})$", raw)
-        return digits.group(1) if digits and "_" in raw else None
-
-    def search(self, address: str, deadline: Optional[float] = None) -> List[Candidate]:
-        data = self._get_json("/do/location-autocomplete", {"location": address, "v": 2}, deadline)
-        payload = data.get("payload")
-        if not isinstance(payload, dict):
+    def geocode(self, address: str, deadline: Optional[float] = None) -> List[Location]:
+        data = self._get_json(
+            {
+                "address": address,
+                "benchmark": "Public_AR_Current",
+                "vintage": "Current_Current",
+                "format": "json",
+            },
+            deadline,
+        )
+        result = data.get("result")
+        matches = result.get("addressMatches") if isinstance(result, dict) else None
+        if not isinstance(matches, list):
             raise ProviderUnavailable()
-        rows: List[Dict[str, Any]] = []
-        exact = payload.get("exactMatch")
-        if isinstance(exact, dict):
-            rows.append(exact)
-        else:
-            for section in payload.get("sections") or []:
-                if isinstance(section, dict):
-                    rows.extend(r for r in section.get("rows") or [] if isinstance(r, dict))
-        seen, out = set(), []
-        for row in rows:
-            if "/home/" not in str(row.get("url", "")):
-                continue  # not a specific property (city, neighborhood, ...)
-            pid = self._property_id(row)
-            if not pid or pid in seen:
+        out: List[Location] = []
+        seen = set()
+        for match in matches:
+            if not isinstance(match, dict):
                 continue
-            seen.add(pid)
-            display = ", ".join(str(p).strip() for p in (row.get("name"), row.get("subName")) if p)
-            out.append(Candidate(id=pid, display=display or "Unnamed property"))
+            text = match.get("matchedAddress")
+            if not isinstance(text, str) or not text.strip() or text in seen:
+                continue
+            seen.add(text)
+            comp = match.get("addressComponents")
+            comp = comp if isinstance(comp, dict) else {}
+            zip_code = comp.get("zip")
+            state = comp.get("state")
+            counties = (match.get("geographies") or {}).get("Counties")
+            county = counties[0].get("NAME") if isinstance(counties, list) and counties else None
+            out.append(
+                Location(
+                    address=text.strip(),
+                    zip=zip_code if isinstance(zip_code, str) and zip_code.isdigit() else None,
+                    state=state if isinstance(state, str) and len(state) == 2 else None,
+                    county=county if isinstance(county, str) else None,
+                )
+            )
             if len(out) >= MAX_CANDIDATES:
                 break
         return out
 
-    # ── details ──────────────────────────────────────────────────────────────
-    def get_property(self, candidate: Candidate, deadline: Optional[float] = None) -> PropertyFacts:
-        data = self._get_json(
-            "/api/home/details/aboveTheFold",
-            {"propertyId": candidate.id, "accessLevel": 3},
-            deadline,
-        )
-        payload = data.get("payload")
-        if not isinstance(payload, dict):
-            raise ProviderUnavailable()
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-        def fact(value: Any) -> Optional[Fact]:
-            return None if value is None else Fact(value, "retrieved", self.name, stamp)
+class MarketData:
+    """ZIP-level rent and home value from the bundled snapshot."""
 
-        price = _positive_number(_dig(payload, "listPrice", "value")) or _positive_number(
-            _dig(payload, "priceInfo", "amount")
-        )
-        beds = _dig(payload, "beds")
-        beds = (
-            int(beds)
-            if isinstance(beds, (int, float)) and not isinstance(beds, bool) and beds >= 0
-            else None
-        )
-        state = _dig(payload, "addressSectionInfo", "state") or _dig(
-            payload, "addressSectionInfo", "streetAddress", "state"
-        )
-        state = (
-            state.strip().upper()
-            if isinstance(state, str) and re.fullmatch(r"[A-Za-z]{2}", state.strip())
-            else None
-        )
-        sqft = _positive_number(_dig(payload, "sqFt", "value"))
-        hoa = _dig(payload, "hoa", "value")
-        hoa = (
-            float(hoa)
-            if isinstance(hoa, (int, float)) and not isinstance(hoa, bool) and hoa >= 0
-            else None
-        )
-        ptype = _dig(payload, "propertyType")
+    def __init__(self, path: Path = DATA_FILE):
+        self.path = path
 
-        return PropertyFacts(
-            address=Fact(candidate.display, "retrieved", self.name, stamp),
-            price=fact(price),
-            beds=fact(beds),
-            state=fact(state),
-            sqft=fact(sqft),
-            hoa_monthly=fact(hoa),
-            property_type=fact(ptype if isinstance(ptype, str) and ptype else None),
+    @lru_cache(maxsize=1)  # noqa: B019 - one shared snapshot per process is intended
+    def _load(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            raise ProviderUnavailable("Market data is unavailable.") from None
+
+    def lookup(self, zip_code: str) -> ZipMarket:
+        data = self._load()
+        entry = data.get("zips", {}).get(zip_code)
+        if not entry:
+            raise InsufficientData(
+                f"We don't have rent data for ZIP {zip_code}. It may be a PO box, unique "
+                "(institutional) ZIP, or a very small area.",
+                missing=["rent"],
+            )
+        rent, value, state = entry
+        return ZipMarket(
+            zip=zip_code,
+            state=state,
+            rent=float(rent) if rent else None,
+            home_value=float(value) if value else None,
+            rent_as_of=data["rent"]["as_of"],
+            value_as_of=data["value"]["as_of"],
+            rent_source=data["rent"]["name"],
+            value_source=data["value"]["name"],
         )
 
 
-def build_provider(name: str, connect_timeout: float, read_timeout: float) -> PropertyProvider:
-    if name == "redfin":
-        return RedfinProvider(connect_timeout, read_timeout)
-    return DisabledProvider()
+def build_geocoder(name: str, connect_timeout: float, read_timeout: float) -> Geocoder:
+    if name == "census":
+        return CensusGeocoder(connect_timeout, read_timeout)
+    return DisabledGeocoder()

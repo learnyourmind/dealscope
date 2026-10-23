@@ -1,55 +1,36 @@
-"""Orchestration: validated request → property facts → analysis (spec §6 request flow)."""
+"""Orchestration: validated request → geocode → area market data → analysis (spec §6)."""
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from .analysis import Fact, PropertyFacts, build_analysis, missing_required
+from .analysis import build_analysis
 from .errors import AmbiguousMatch, InsufficientData, PropertyNotFound
-from .provider import Candidate, PropertyProvider
-from .validation import AnalysisRequest, parse_request
-
-
-def _manual_facts(req: AnalysisRequest) -> PropertyFacts:
-    p = req.property
-
-    def user(value: Any) -> Optional[Fact]:
-        return None if value is None else Fact(value, "user", "You entered this")
-
-    return PropertyFacts(
-        address=user(req.address),
-        price=user(p.purchase_price),
-        beds=user(p.beds),
-        state=user(p.state),
-        hoa_monthly=user(p.hoa_monthly),
-    )
+from .provider import Geocoder, MarketData
+from .validation import parse_request
 
 
 def run_analysis(
-    payload: Any, provider: PropertyProvider, budget_s: float = 15.0
+    payload: Any, geocoder: Geocoder, market: MarketData, budget_s: float = 15.0
 ) -> Dict[str, Any]:
     req = parse_request(payload)
     deadline = time.monotonic() + budget_s
 
-    if req.property is not None:
-        facts = _manual_facts(req)
-    else:
-        if req.candidate_id:
-            candidate = Candidate(id=req.candidate_id, display=req.address)
-        else:
-            candidates = provider.search(req.address, deadline)
-            if not candidates:
-                raise PropertyNotFound()
-            if len(candidates) > 1:
-                raise AmbiguousMatch([c.to_dict() for c in candidates])
-            candidate = candidates[0]
-        facts = provider.get_property(candidate, deadline)
+    locations = geocoder.geocode(req.address, deadline)
+    if not locations:
+        raise PropertyNotFound()
+    if len(locations) > 1:
+        raise AmbiguousMatch([loc.to_candidate() for loc in locations])
+    location = locations[0]
 
-    missing = missing_required(facts)
-    if missing:
+    if not location.zip:
         raise InsufficientData(
-            "The data source did not provide: " + ", ".join(missing) + ". "
-            "Enter the price, bedrooms, and state to continue.",
-            missing=missing,
-            manual_entry_required=True,
+            "The address matched, but no ZIP code was returned, so we can't look up local rents.",
+            missing=["zip"],
         )
-    return {"success": True, "analysis": build_analysis(req, facts)}
+    zip_market = market.lookup(location.zip)
+    if zip_market.rent is None:
+        raise InsufficientData(
+            f"We don't have rent data for ZIP {location.zip}. Try an address in a nearby ZIP.",
+            missing=["rent"],
+        )
+    return {"success": True, "analysis": build_analysis(req, location, zip_market)}

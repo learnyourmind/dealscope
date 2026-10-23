@@ -1,20 +1,26 @@
-"""Redfin adapter tests with synthetic payloads. The live service is never contacted.
+"""Census geocoder adapter and bundled market data. The network is never contacted.
 
-Payload shapes are written from the field names the adapter reads; they are NOT recordings
-of real responses (plan P0-1 forbids probing the live endpoint until terms are reviewed).
+Payloads are synthetic but follow the shape verified against the live Census Geocoder.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 import requests
 
 from dealscope.errors import (
+    InsufficientData,
     ProviderRateLimited,
     ProviderTimeout,
     ProviderUnavailable,
 )
-from dealscope.provider import Candidate, DisabledProvider, RedfinProvider, build_provider
+from dealscope.provider import (
+    CensusGeocoder,
+    DisabledGeocoder,
+    MarketData,
+    build_geocoder,
+)
 
 
 class FakeResponse:
@@ -35,50 +41,61 @@ class FakeSession:
         return self.response
 
 
-def provider(response=None, exc=None):
-    return RedfinProvider(session=FakeSession(response, exc)), None
+def match(text, zip="78701", state="TX", county="Travis County"):
+    return {
+        "matchedAddress": text,
+        "addressComponents": {"zip": zip, "state": state},
+        "geographies": {"Counties": [{"NAME": county}]},
+    }
 
 
-def row(pid, name="100 Example St", sub="Austin, TX"):
-    return {"id": f"1_{pid}", "name": name, "subName": sub, "url": f"/TX/Austin/x/home/{pid}"}
+def body(*matches):
+    return {"result": {"addressMatches": list(matches)}}
 
 
-def search_payload(*rows, exact=None):
-    payload = {"exactMatch": exact} if exact else {"sections": [{"rows": list(rows)}]}
-    return {"payload": payload}
+def geocoder(response=None, exc=None, connect=3, read=8):
+    session = FakeSession(response, exc)
+    return CensusGeocoder(connect, read, session), session
 
 
-def test_search_returns_normalized_candidates_and_uses_timeouts():
-    session = FakeSession(FakeResponse(body=search_payload(row(111), row(222))))
-    result = RedfinProvider(3, 8, session).search("100 Example St")
-    assert [c.id for c in result] == ["111", "222"]
-    assert result[0].display == "100 Example St, Austin, TX"
-    assert session.calls[0][2] == (3, 8)
-
-
-def test_search_exact_match_is_single_candidate():
-    session = FakeSession(FakeResponse(body=search_payload(exact=row(111))))
-    assert len(RedfinProvider(session=session).search("x")) == 1
-
-
-def test_search_ignores_non_property_rows_and_caps_results():
-    rows = [{"id": "2_9", "name": "Austin", "url": "/city/9/TX/Austin"}] + [
-        row(i) for i in range(1, 9)
-    ]
-    result = RedfinProvider(session=FakeSession(FakeResponse(body=search_payload(*rows)))).search(
-        "x"
+def test_geocode_returns_normalized_location_and_uses_timeouts():
+    g, session = geocoder(FakeResponse(body=body(match("100 EXAMPLE ST, AUSTIN, TX, 78701"))))
+    (location,) = g.geocode("100 example st austin")
+    assert (location.address, location.zip, location.state, location.county) == (
+        "100 EXAMPLE ST, AUSTIN, TX, 78701",
+        "78701",
+        "TX",
+        "Travis County",
     )
-    assert len(result) == 5 and all(c.id.isdigit() for c in result)
+    url, params, timeout = session.calls[0]
+    assert "geocoding.geo.census.gov" in url and params["address"] == "100 example st austin"
+    assert timeout == (3, 8)
 
 
-def test_search_empty_is_empty_list_not_error():
-    session = FakeSession(FakeResponse(body={"payload": {"sections": []}}))
-    assert RedfinProvider(session=session).search("nowhere") == []
+def test_geocode_multiple_matches_deduplicated_and_capped():
+    matches = [match(f"{n} A ST, AUSTIN, TX, 78701") for n in range(1, 9)] + [
+        match("1 A ST, AUSTIN, TX, 78701")
+    ]
+    g, _ = geocoder(FakeResponse(body=body(*matches)))
+    result = g.geocode("a st")
+    assert len(result) == 5 and len({r.address for r in result}) == 5
 
 
-def test_redfin_json_prefix_is_stripped():
-    raw = b"{}&&" + json.dumps(search_payload(row(111))).encode()
-    assert RedfinProvider(session=FakeSession(FakeResponse(raw=raw))).search("x")[0].id == "111"
+def test_geocode_no_match_is_empty_list_not_an_error():
+    g, _ = geocoder(FakeResponse(body=body()))
+    assert g.geocode("nowhere") == []
+
+
+def test_geocode_tolerates_missing_optional_fields():
+    g, _ = geocoder(
+        FakeResponse(
+            body=body(
+                {"matchedAddress": "1 B ST", "addressComponents": {"zip": "ABC", "state": "Texas"}}
+            )
+        )
+    )
+    (location,) = g.geocode("x")
+    assert location.zip is None and location.state is None and location.county is None
 
 
 @pytest.mark.parametrize(
@@ -90,7 +107,7 @@ def test_redfin_json_prefix_is_stripped():
         (FakeResponse(404, {}), None, ProviderUnavailable),
         (FakeResponse(raw=b"<html>blocked</html>"), None, ProviderUnavailable),
         (FakeResponse(raw=b"[1, 2]"), None, ProviderUnavailable),
-        (FakeResponse(body={"payload": "nope"}), None, ProviderUnavailable),
+        (FakeResponse(body={"result": "nope"}), None, ProviderUnavailable),
         (FakeResponse(raw=b"x" * (2 * 1024 * 1024 + 1)), None, ProviderUnavailable),
         (None, requests.Timeout(), ProviderTimeout),
         (None, requests.ConnectTimeout(), ProviderTimeout),
@@ -98,62 +115,54 @@ def test_redfin_json_prefix_is_stripped():
     ],
 )
 def test_upstream_failures_map_to_safe_domain_errors(response, exc, expected):
+    g, _ = geocoder(response, exc)
     with pytest.raises(expected) as caught:
-        RedfinProvider(session=FakeSession(response, exc)).search("x")
+        g.geocode("x")
     assert "boom" not in caught.value.message and "blocked" not in caught.value.message
 
 
 def test_expired_deadline_raises_timeout_without_calling_upstream():
-    session = FakeSession(FakeResponse(body={}))
+    g, session = geocoder(FakeResponse(body=body()))
     with pytest.raises(ProviderTimeout):
-        RedfinProvider(session=session).search("x", deadline=0.0)
+        g.geocode("x", deadline=0.0)
     assert session.calls == []
 
 
-def test_get_property_normalizes_and_stamps_provenance():
-    body = {
-        "payload": {
-            "listPrice": {"value": 410000},
-            "beds": 3,
-            "sqFt": {"value": 1800},
-            "hoa": {"value": 55},
-            "propertyType": "Single Family",
-            "addressSectionInfo": {"state": "tx"},
-        }
-    }
-    facts = RedfinProvider(session=FakeSession(FakeResponse(body=body))).get_property(
-        Candidate("111", "100 Example St, Austin, TX")
-    )
-    assert (facts.price.value, facts.beds.value, facts.state.value, facts.hoa_monthly.value) == (
-        410000.0,
-        3,
-        "TX",
-        55.0,
-    )
-    assert (
-        facts.price.kind == "retrieved"
-        and facts.price.source == "redfin"
-        and facts.price.retrieved_at
-    )
+def test_build_geocoder_selection():
+    assert isinstance(build_geocoder("census", 3, 8), CensusGeocoder)
+    assert isinstance(build_geocoder("anything-else", 3, 8), DisabledGeocoder)
+    with pytest.raises(ProviderUnavailable):
+        DisabledGeocoder().geocode("x")
 
 
-def test_get_property_missing_fields_are_none_not_defaults():
-    facts = RedfinProvider(
-        session=FakeSession(FakeResponse(body={"payload": {"beds": 2}}))
-    ).get_property(Candidate("111", "x"))
-    assert facts.price is None and facts.state is None and facts.hoa_monthly is None
-    assert facts.beds.value == 2
+# ── market data ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("bad_state", ["Texas", "T", "12", None, 5])
-def test_get_property_rejects_malformed_state(bad_state):
-    body = {"payload": {"listPrice": {"value": 1}, "addressSectionInfo": {"state": bad_state}}}
-    facts = RedfinProvider(session=FakeSession(FakeResponse(body=body))).get_property(
-        Candidate("1", "x")
-    )
-    assert facts.state is None
+def test_market_lookup_returns_rent_value_and_provenance(market):
+    m = market.lookup("78701")
+    assert (m.rent, m.home_value, m.state) == (3177.0, 650693.0, "TX")
+    assert m.rent_as_of == "2026-09" and "ZORI" in m.rent_source
 
 
-def test_build_provider_defaults_to_disabled():
-    assert isinstance(build_provider("anything-else", 3, 8), DisabledProvider)
-    assert isinstance(build_provider("redfin", 3, 8), RedfinProvider)
+def test_market_lookup_with_missing_rent_keeps_value(market):
+    m = market.lookup("59001")
+    assert m.rent is None and m.home_value == 448166.0
+
+
+def test_market_lookup_unknown_zip_is_insufficient_data_not_a_default(market):
+    with pytest.raises(InsufficientData):
+        market.lookup("00000")
+
+
+def test_unreadable_market_file_is_provider_unavailable(tmp_path):
+    with pytest.raises(ProviderUnavailable):
+        MarketData(tmp_path / "missing.json").lookup("78701")
+
+
+def test_bundled_snapshot_is_present_and_plausible():
+    data = json.loads((Path(__file__).parent.parent / "data" / "zip_market.json").read_text())
+    assert len(data["zips"]) > 20_000
+    assert data["rent"]["as_of"][:2] == "20" and data["value"]["as_of"][:2] == "20"
+    rent, value, state = data["zips"]["78701"]
+    assert 1_000 < rent < 10_000 and 100_000 < value < 3_000_000 and state == "TX"
+    assert all(len(z) == 5 and z.isdigit() for z in list(data["zips"])[:500])

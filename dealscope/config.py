@@ -18,7 +18,7 @@ class Config:
     app_env: str = "development"
     app_version: str = "dev"
     cors_origins: Tuple[str, ...] = ()
-    property_provider: str = "disabled"
+    geocoder: str = "census"
     connect_timeout_s: float = 3.0
     read_timeout_s: float = 8.0
     request_budget_s: float = 15.0
@@ -36,8 +36,7 @@ class Config:
             app_version=os.environ.get("APP_VERSION")
             or os.environ.get("VERCEL_GIT_COMMIT_SHA", "dev")[:7],
             cors_origins=origins,
-            # Off by default: the unofficial Redfin endpoint needs terms review (spec §7, D-01).
-            property_provider=os.environ.get("PROPERTY_PROVIDER", "disabled").strip().lower(),
+            geocoder=os.environ.get("GEOCODER", "census").strip().lower(),
             connect_timeout_s=_float("UPSTREAM_CONNECT_TIMEOUT_S", 3.0),
             read_timeout_s=_float("UPSTREAM_READ_TIMEOUT_S", 8.0),
             rate_limit=os.environ.get("RATE_LIMIT", "20/minute"),

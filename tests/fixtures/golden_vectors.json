@@ -1,5 +1,5 @@
 {
-  "_comment": "Authoritative calculation vector from spec.md §5.2 'Golden test vector'. The future dealscope.analysis module (plan.md task 1.3) must reproduce `expected` from `inputs`. Currency to the cent; percentages to two decimals.",
+  "_comment": "Authoritative calculation vector from spec.md \u00a75.2 'Golden test vector'. The future dealscope.analysis module (plan.md task 1.3) must reproduce `expected` from `inputs`. Currency to the cent; percentages to two decimals.",
   "vectors": [
     {
       "name": "tx_400k_20pct_7pct_30yr",
@@ -17,19 +17,50 @@
         "capex_reserve_pct_of_price_per_year": 1
       },
       "expected": {
-        "down_payment": 80000.00,
-        "loan_amount": 320000.00,
+        "down_payment": 80000.0,
+        "loan_amount": 320000.0,
         "monthly_principal_interest": 2128.97,
         "monthly_property_tax": 543.33,
         "monthly_insurance": 516.67,
         "monthly_capex_reserve": 333.33,
-        "monthly_vacancy": 140.00,
-        "monthly_management": 224.00,
+        "monthly_vacancy": 140.0,
+        "monthly_management": 224.0,
         "monthly_operating_expenses": 1757.33,
         "monthly_noi": 1042.67,
-        "monthly_cash_flow": -1086.30,
+        "monthly_cash_flow": -1086.3,
         "cap_rate_pct": 3.13,
         "cash_on_cash_pct": -16.29
+      }
+    }
+  ],
+  "price_vectors": [
+    {
+      "name": "tx_rent3000_20pct_7pct_30yr_goal100",
+      "_comment": "Closed-form price solver (spec \u00a75.2): highest purchase price meeting the cash-flow goal. Prices are floored to $1,000 for display.",
+      "inputs": {
+        "gross_monthly_rent": 3000,
+        "down_payment_pct": 20,
+        "annual_interest_rate_pct": 7.0,
+        "loan_term_years": 30,
+        "property_tax_rate_pct": 1.63,
+        "insurance_rate_pct": 1.55,
+        "hoa_monthly": 0,
+        "min_monthly_cash_flow": 100,
+        "vacancy_pct": 5,
+        "management_pct": 8,
+        "capex_reserve_pct_of_price_per_year": 1
+      },
+      "expected": {
+        "piti_breakeven_price": 376000,
+        "allin_breakeven_price": 296000,
+        "target_price": 285000,
+        "monthly_at_target": {
+          "principal_interest": 1516.89,
+          "property_tax": 387.12,
+          "insurance": 368.12,
+          "piti_total": 2272.14,
+          "cash_flow": 100.36
+        }
       }
     }
   ]
