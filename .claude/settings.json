@@ -20,7 +20,6 @@
       "Bash(git commit:*)"
     ],
     "deny": [
-      "Bash(git push:*)",
       "Bash(git push --force:*)",
       "Bash(git reset --hard:*)",
       "Bash(git clean:*)",
