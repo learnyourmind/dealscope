@@ -26,3 +26,4 @@ htmlcov/
 
 # Claude Code: keep shared project config, ignore personal overrides
 .claude/settings.local.json
+.vercel
