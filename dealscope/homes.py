@@ -89,6 +89,8 @@ class RentCastHomes(HomeRecords):
             deadline,
             headers={"X-Api-Key": self._api_key, "Accept": "application/json"},
             not_found_ok=True,
+            source="rentcast",
+            keyed=True,
         )
         if not isinstance(data, dict):
             return None

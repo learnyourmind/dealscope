@@ -82,6 +82,18 @@ class ProviderTimeout(DealScopeError):
     message = "The property data source took too long to respond. Please try again."
 
 
+class ProviderAccessDenied(DealScopeError):
+    """The data source rejected our credentials or plan (HTTP 401/403 from a keyed API).
+
+    Same public code and status as ProviderUnavailable: users cannot fix it, and the message
+    must not reveal configuration details. The reason is logged server-side as a status code.
+    """
+
+    code = "PROVIDER_UNAVAILABLE"
+    status = 502
+    message = "The property-data source is unavailable. Please try again."
+
+
 class ProviderRateLimited(DealScopeError):
     code = "PROVIDER_RATE_LIMITED"
     status = 503

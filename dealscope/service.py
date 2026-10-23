@@ -8,6 +8,7 @@ from .errors import (
     AmbiguousMatch,
     InsufficientData,
     PropertyNotFound,
+    ProviderAccessDenied,
     ProviderRateLimited,
     ProviderTimeout,
     ProviderUnavailable,
@@ -23,6 +24,8 @@ def _lookup_home(homes: Optional[HomeRecords], address: str, deadline: float):
         return None, None
     try:
         record = homes.lookup(address, deadline)
+    except ProviderAccessDenied:
+        return None, "the property-data source could not be used right now"
     except ProviderRateLimited:
         return None, "the property-data source is rate limited or its monthly quota is used up"
     except ProviderTimeout:

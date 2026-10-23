@@ -11,6 +11,7 @@ import requests
 
 from dealscope.errors import (
     InsufficientData,
+    ProviderAccessDenied,
     ProviderRateLimited,
     ProviderTimeout,
     ProviderUnavailable,
@@ -242,7 +243,7 @@ def test_rentcast_not_found_and_empty_payloads_return_none():
         (
             FakeResponse(401, {"error": "auth/api-key-invalid", "message": "bad key"}),
             None,
-            ProviderUnavailable,
+            ProviderAccessDenied,
         ),
         (FakeResponse(429, {}), None, ProviderRateLimited),
         (FakeResponse(500, {}), None, ProviderUnavailable),
@@ -271,3 +272,69 @@ def test_build_homes_is_disabled_without_a_key():
     assert build_homes("", 3, 8).enabled is False
     assert build_homes("   ", 3, 8).enabled is False
     assert isinstance(build_homes("k", 3, 8), RentCastHomes)
+
+
+# ── diagnostics: why an upstream call failed, without leaking anything ─────────────────
+
+import logging  # noqa: E402
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_keyed_api_auth_failures_are_access_denied_not_rate_limited(status):
+    h, _ = homes(FakeResponse(status, {"error": "auth/api-key-invalid", "message": "bad key"}))
+    with pytest.raises(ProviderAccessDenied) as caught:
+        h.lookup("x")
+    assert caught.value.code == "PROVIDER_UNAVAILABLE" and "key" not in caught.value.message.lower()
+
+
+def test_429_stays_a_rate_limit_even_for_the_keyed_api():
+    h, _ = homes(FakeResponse(429, {"error": "billing/plan-limit"}))
+    with pytest.raises(ProviderRateLimited):
+        h.lookup("x")
+
+
+def test_census_403_is_still_a_rate_limit_not_access_denied():
+    g, _ = geocoder(FakeResponse(403, {}))
+    with pytest.raises(ProviderRateLimited):
+        g.geocode("x")
+
+
+def test_upstream_failure_logs_source_status_and_code_only(caplog):
+    h, _ = homes(
+        FakeResponse(
+            403,
+            {
+                "error": "billing/plan-limit",
+                "message": "secret text 123 Main St",
+                "key": "test-key-123",
+            },
+        )
+    )
+    with caplog.at_level(logging.WARNING, logger="dealscope"):
+        with pytest.raises(ProviderAccessDenied):
+            h.lookup("100 Example St, Austin, TX, 78701")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert '"source": "rentcast"' in text and '"status": 403' in text
+    assert '"code": "billing/plan-limit"' in text
+    for forbidden in ("test-key-123", "secret text", "Example St", "X-Api-Key", "address"):
+        assert forbidden not in text
+
+
+def test_upstream_log_drops_free_text_codes():
+    from dealscope.provider import _log_upstream_error
+
+    records = []
+
+    class Grab(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    logger = logging.getLogger("dealscope")
+    handler = Grab()
+    logger.addHandler(handler)
+    try:
+        _log_upstream_error("x", 500, b'{"error": "has spaces and 123 Main St"}')
+        _log_upstream_error("x", 500, b"<html>not json</html>")
+    finally:
+        logger.removeHandler(handler)
+    assert all('"code": null' in line for line in records) and len(records) == 2

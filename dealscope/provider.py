@@ -9,6 +9,8 @@ not licensed for this use, so home-level facts (price, beds, baths, sqft) are no
 """
 
 import json
+import logging
+import re
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -19,12 +21,15 @@ import requests
 
 from .errors import (
     InsufficientData,
+    ProviderAccessDenied,
     ProviderRateLimited,
     ProviderTimeout,
     ProviderUnavailable,
 )
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+log = logging.getLogger("dealscope")
+_SAFE_CODE = re.compile(r"^[A-Za-z0-9/_.-]{1,60}$")
 MAX_CANDIDATES = 5
 _USER_AGENT = "DealScope/0.2 (first-pass rental analysis)"
 CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
@@ -55,6 +60,25 @@ class ZipMarket:
     value_source: str
 
 
+def _log_upstream_error(source: str, status: int, body: bytes) -> None:
+    """Record WHY an upstream call failed without leaking anything sensitive.
+
+    Logs the source name, the HTTP status, and a short machine code from the error body
+    (for example "auth/api-key-invalid") only if it matches a strict pattern. Never logs the
+    URL, query (address), headers (API key), or free-text message.
+    """
+    code = None
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+        raw = payload.get("error") or payload.get("code") if isinstance(payload, dict) else None
+        code = raw if isinstance(raw, str) and _SAFE_CODE.match(raw) else None
+    except ValueError:
+        pass
+    log.warning(
+        json.dumps({"event": "upstream_error", "source": source, "status": status, "code": code})
+    )
+
+
 def http_get_json(
     session: requests.Session,
     url: str,
@@ -63,10 +87,14 @@ def http_get_json(
     deadline: Optional[float] = None,
     headers: Optional[Dict[str, str]] = None,
     not_found_ok: bool = False,
+    source: str = "upstream",
+    keyed: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """GET JSON with bounded time and size; map every failure to a safe domain error.
 
     Returns None for HTTP 404 when `not_found_ok`. Never puts upstream text in an error.
+    With `keyed=True`, 401/403 mean our credentials or plan were rejected (ProviderAccessDenied);
+    429 is always a rate/quota limit.
     """
     connect, read = timeouts
     if deadline is not None:
@@ -83,9 +111,12 @@ def http_get_json(
     status = resp.status_code
     if status == 404 and not_found_ok:
         return None
-    if status in (403, 429):
-        raise ProviderRateLimited()
     if status >= 400:
+        _log_upstream_error(source, status, resp.content or b"")
+        if keyed and status in (401, 403):
+            raise ProviderAccessDenied()
+        if status in (403, 429):
+            raise ProviderRateLimited()
         raise ProviderUnavailable()
     body = resp.content or b""
     if len(body) > MAX_RESPONSE_BYTES:
