@@ -23,6 +23,7 @@ from dealscope.errors import (
     RateLimited,
 )
 from dealscope.forms import form_to_payload
+from dealscope.homes import HomeRecords, build_homes
 from dealscope.provider import Geocoder, MarketData, build_geocoder
 from dealscope.ratelimit import RateLimiter, parse_rate
 from dealscope.service import run_analysis
@@ -55,6 +56,7 @@ def create_app(
     config: Optional[Config] = None,
     geocoder: Optional[Geocoder] = None,
     market: Optional[MarketData] = None,
+    homes: Optional[HomeRecords] = None,
 ) -> Flask:
     config = config or Config.from_env()
     app = Flask(__name__)
@@ -64,6 +66,9 @@ def create_app(
         config.geocoder, config.connect_timeout_s, config.read_timeout_s
     )
     market = market or MarketData()
+    homes = homes or build_homes(
+        config.rentcast_api_key, config.connect_timeout_s, config.read_timeout_s
+    )
     parsed_rate = parse_rate(config.rate_limit)
     limiter = RateLimiter(*parsed_rate) if parsed_rate else None
 
@@ -159,6 +164,7 @@ def create_app(
             render_template(
                 "index.html",
                 lookup_enabled=geocoder.enabled,
+                homes_enabled=homes.enabled,
                 bounds=V,
                 version=config.app_version,
                 **ctx,
@@ -172,7 +178,9 @@ def create_app(
             return _page()
         form = request.form.to_dict()
         try:
-            result = run_analysis(form_to_payload(form), geocoder, market, config.request_budget_s)
+            result = run_analysis(
+                form_to_payload(form), geocoder, market, homes, config.request_budget_s
+            )
         except DealScopeError as err:
             g.error_code = err.code
             return _page(err.status, form=form, error=_error_body(err)["error"])
@@ -188,7 +196,7 @@ def create_app(
             raise InvalidRequest(
                 "The request body must be JSON with a Content-Type of application/json."
             )
-        return jsonify(run_analysis(payload, geocoder, market, config.request_budget_s))
+        return jsonify(run_analysis(payload, geocoder, market, homes, config.request_budget_s))
 
     @app.route("/healthz")
     def healthz():

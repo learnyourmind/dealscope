@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from . import assumptions as A
 from .errors import InsufficientData
+from .homes import MULTI_UNIT_TYPES, HomeRecord
 from .provider import Location, ZipMarket
 from .validation import AnalysisRequest
 
@@ -214,7 +215,13 @@ PRICE_DEFS = (
 )
 
 
-def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) -> Dict[str, Any]:
+def build_analysis(
+    req: AnalysisRequest,
+    location: Location,
+    market: ZipMarket,
+    home: Optional[HomeRecord] = None,
+    home_note: Optional[str] = None,
+) -> Dict[str, Any]:
     """Assumes the caller verified that `market.rent` exists."""
     state = location.state or market.state
     tax_rate = req.property_tax_rate_pct
@@ -276,24 +283,47 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
     )
 
     # One whole-home unit: never priced room by room.
-    rent = typical_rent
-    if adj == 0:
+    zip_rent_fact = _fact(
+        round(market.rent),
+        "USD/month",
+        "retrieved",
+        source=rent_source,
+        basis="Typical observed rent across homes in the ZIP; not this property's rent.",
+    )
+    own_rent = bool(home and home.rent)
+    if own_rent:
+        rent = home.rent * (1 + adj / 100)
+        range_text = ""
+        if home.rent_low and home.rent_high:
+            range_text = f" Range ${home.rent_low:,.0f}–${home.rent_high:,.0f}."
         rent_fact = _fact(
             round(rent),
             "USD/month",
-            "retrieved",
-            source=rent_source,
-            basis="Typical observed rent across homes in the ZIP, treated as one whole unit; "
-            "not this property's rent.",
+            "retrieved" if adj == 0 else "estimate",
+            source=f"{home.source} rent estimate for this address",
+            basis=f"Automated rent estimate for this home as one whole unit.{range_text}"
+            + ("" if adj == 0 else f" Adjusted by your {adj:+g}%."),
+            **({"range": {"low": home.rent_low, "high": home.rent_high}} if home.rent_low else {}),
         )
     else:
-        rent_fact = _fact(
-            round(rent),
-            "USD/month",
-            "estimate",
-            confidence="low",
-            basis=f"{rent_source} adjusted by your {adj:+g}%.",
-        )
+        rent = typical_rent
+        if adj == 0:
+            rent_fact = _fact(
+                round(rent),
+                "USD/month",
+                "retrieved",
+                source=rent_source,
+                basis="Typical observed rent across homes in the ZIP, treated as one whole unit; "
+                "not this property's rent.",
+            )
+        else:
+            rent_fact = _fact(
+                round(rent),
+                "USD/month",
+                "estimate",
+                confidence="low",
+                basis=f"{rent_source} adjusted by your {adj:+g}%.",
+            )
     prices: Dict[str, Any] = {}
     views: Dict[str, Any] = {}
     for pkey, include_op, mode, note in PRICE_DEFS:
@@ -336,15 +366,37 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
         }
         if market.home_value:
             at_target["pct_of_zip_home_value"] = round(target_price / market.home_value * 100)
-    home = {
-        "label": "Typical home in this ZIP",
-        "configuration": {
+
+    def home_fact(value: Any, unit: Optional[str], reason: str) -> Dict[str, Any]:
+        if value is None:
+            return _unavailable(reason, unit)
+        return _fact(value, unit, "retrieved", source=f"{home.source} property record")
+
+    identified = bool(home and (home.beds is not None or home.baths or home.sqft))
+    if identified:
+        reason = "Not reported for this address."
+        configuration = {
+            "status": "identified",
+            "beds": home_fact(home.beds, "bedrooms", reason),
+            "baths": home_fact(home.baths, "bathrooms", reason),
+            "sqft": home_fact(home.sqft, "sq ft", reason),
+            "property_type": home_fact(home.property_type, None, reason),
+            "year_built": home_fact(home.year_built, None, reason),
+            "note": "Calculated as one whole-home unit"
+            + (" using this home's own rent estimate." if own_rent else " (typical ZIP rent)."),
+        }
+    else:
+        why = f"Not identified: {home_note}." if home_note else NOT_IDENTIFIED
+        configuration = {
             "status": "not_identified",
-            "beds": _unavailable(NOT_IDENTIFIED, "bedrooms"),
-            "baths": _unavailable(NOT_IDENTIFIED, "bathrooms"),
-            "sqft": _unavailable(NOT_IDENTIFIED, "sq ft"),
+            "beds": _unavailable(why, "bedrooms"),
+            "baths": _unavailable(why, "bathrooms"),
+            "sqft": _unavailable(why, "sq ft"),
             "note": "Calculated as a single whole-home unit for a typical home in the ZIP.",
-        },
+        }
+    home_result = {
+        "label": "This home" if own_rent else "Typical home in this ZIP",
+        "configuration": configuration,
         "rent": rent_fact,
         "prices": prices,
         "monthly_at_price": views,
@@ -401,7 +453,7 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
 
     market_json = {
         "zip": market.zip,
-        "typical_rent": home["rent"],
+        "typical_rent": zip_rent_fact,
         "typical_home_value": (
             _fact(
                 round(market.home_value),
@@ -421,9 +473,14 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
         "advice, and it does not predict returns.",
         "Prices are the most you could pay for the stated cash flow under these assumptions. They "
         "are not an appraisal, a listing price, or a forecast of what the property will sell for.",
-        "The home is treated as one whole unit (never rented room by room). Its configuration "
-        "(bedrooms, bathrooms, size) is not identified, so rent is the ZIP's typical rent across "
-        "homes, not a quote for a specific property. Check local listings.",
+        (
+            f"Rent is {home.source}'s automated estimate for this address, treated as one whole "
+            "unit (never rented room by room). It is not a quote; check local listings."
+            if own_rent
+            else "The home is treated as one whole unit (never rented room by room). Its "
+            "configuration is not identified, so rent is the ZIP's typical rent across homes, "
+            "not a quote for a specific property. Check local listings."
+        ),
         "Property tax and insurance use state averages unless you entered rates. Actual bills "
         "vary by county, assessment, and property.",
         "Vacancy, management, and maintenance reserve are default assumptions.",
@@ -432,6 +489,15 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
     ]
     if not hoa_known:
         limitations.append("HOA fees are unknown and counted as $0; results are qualified.")
+    if home_note:
+        limitations.append(
+            f"Home details could not be retrieved ({home_note}); showing a typical home in the ZIP."
+        )
+    if home and home.property_type in MULTI_UNIT_TYPES:
+        limitations.append(
+            f"The record lists this as {home.property_type}; the rent estimate is for a single "
+            "unit, not the whole building."
+        )
 
     return {
         "location": {
@@ -444,7 +510,7 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
         },
         "market": market_json,
         "assumptions": assumptions,
-        "home": home,
+        "home": home_result,
         "qualifier": qualifier,
         "limitations": limitations,
         "sources": [
@@ -458,6 +524,17 @@ def build_analysis(req: AnalysisRequest, location: Location, market: ZipMarket) 
                 "url": "https://www.zillow.com/research/data/",
                 "used_for": f"Typical rent ({market.rent_as_of})",
             },
+            *(
+                [
+                    {
+                        "name": f"{home.source} property record and rent estimate",
+                        "url": "https://developers.rentcast.io/",
+                        "used_for": "This home's bedrooms, baths, size, type, rent estimate",
+                    }
+                ]
+                if home and (own_rent or identified)
+                else []
+            ),
             {
                 "name": market.value_source,
                 "url": "https://www.zillow.com/research/data/",

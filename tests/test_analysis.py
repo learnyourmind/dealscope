@@ -154,7 +154,8 @@ def test_typical_rent_is_public_data_with_source_and_home_value_context():
     rent = a["home"]["rent"]
     assert rent["kind"] == "retrieved" and "ZIP 78701" in rent["source"]
     assert "one whole unit" in rent["basis"]
-    assert a["market"]["typical_rent"] == rent
+    assert a["market"]["typical_rent"]["kind"] == "retrieved"
+    assert a["market"]["typical_rent"]["value"] == rent["value"]
     assert a["market"]["typical_home_value"]["kind"] == "retrieved"
 
 
@@ -267,3 +268,83 @@ def test_price_solver_reproduces_spec_price_vector():
     view = monthly_view(price=target, include_operating_costs=True, **kw)
     for key, expected in exp["monthly_at_target"].items():
         assert view[key] == pytest.approx(expected, abs=0.01), key
+
+
+# ── identified home (permitted property-data source) ────────────────────────────────────
+
+from tests.conftest import home_record  # noqa: E402
+
+
+def with_home(record, **req):
+    return (
+        analysis(AnalysisRequest(address="x", **req))
+        if record is None
+        else build_analysis(AnalysisRequest(address="x", **req), LOC, MKT, home=record)
+    )
+
+
+def test_identified_home_uses_its_own_rent_and_reports_its_configuration():
+    a = with_home(home_record())
+    h = a["home"]
+    assert h["label"] == "This home" and h["rent"]["value"] == 2800
+    assert h["rent"]["kind"] == "retrieved" and "RentCast" in h["rent"]["source"]
+    assert h["rent"]["range"] == {"low": 2500.0, "high": 3100.0}
+    cfg = h["configuration"]
+    assert cfg["status"] == "identified"
+    assert (cfg["beds"]["value"], cfg["baths"]["value"], cfg["sqft"]["value"]) == (3, 2.0, 1850)
+    assert cfg["property_type"]["value"] == "Single Family" and cfg["beds"]["kind"] == "retrieved"
+    assert a["market"]["typical_rent"]["value"] == 3177  # ZIP context is unchanged
+    assert any("RentCast" in s["name"] for s in a["sources"])
+    assert "scenarios" not in a and "one whole unit" in " ".join(a["limitations"])
+
+
+def test_identified_home_prices_follow_its_rent_not_the_zip_rent():
+    own = with_home(home_record(rent=2000.0))["home"]["prices"]["target"]["value"]
+    zip_typical = with_home(None)["home"]["prices"]["target"]["value"]
+    assert own < zip_typical
+
+
+def test_rent_adjustment_turns_the_home_rent_into_an_estimate():
+    rent = with_home(home_record(), rent_adjustment_pct=10)["home"]["rent"]
+    assert rent["kind"] == "estimate" and rent["value"] == round(2800 * 1.1)
+
+
+def test_home_with_configuration_but_no_rent_falls_back_to_zip_rent():
+    h = with_home(home_record(rent=None, rent_low=None, rent_high=None))["home"]
+    assert h["configuration"]["status"] == "identified" and h["label"] == "Typical home in this ZIP"
+    assert h["rent"]["value"] == 3177
+
+
+def test_partial_configuration_marks_missing_fields_unavailable():
+    cfg = with_home(home_record(baths=None, sqft=None))["home"]["configuration"]
+    assert cfg["beds"]["value"] == 3
+    assert cfg["baths"]["kind"] == "unavailable" and cfg["sqft"]["kind"] == "unavailable"
+
+
+def test_multi_unit_record_warns_that_rent_is_for_one_unit():
+    a = with_home(home_record(property_type="Multi-Family"))
+    assert any("single unit, not the whole building" in t for t in a["limitations"])
+
+
+def test_lookup_failure_note_degrades_visibly_to_zip_typical():
+    a = build_analysis(
+        AnalysisRequest(address="x"),
+        LOC,
+        MKT,
+        home=None,
+        home_note="the property-data source timed out",
+    )
+    h = a["home"]
+    assert (
+        h["label"] == "Typical home in this ZIP"
+        and h["configuration"]["status"] == "not_identified"
+    )
+    assert "timed out" in h["configuration"]["beds"]["reason"]
+    assert any("could not be retrieved" in t for t in a["limitations"])
+
+
+def test_no_negative_or_zero_rent_from_a_bad_record_is_ever_used():
+    h = with_home(
+        home_record(rent=0.0, rent_low=None, rent_high=None, beds=None, baths=None, sqft=None)
+    )["home"]
+    assert h["rent"]["value"] == 3177 and h["configuration"]["status"] == "not_identified"

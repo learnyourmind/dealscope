@@ -12,7 +12,7 @@
 
 DealScope lets a prospective residential property investor type a US address and see, for that area, the rent homes typically earn and the **highest purchase price at which that rent still covers mortgage, property tax and insurance (PITI) — and, separately, meets a monthly cash-flow goal after vacancy, management and maintenance**. The home is analyzed as **one whole rental unit, never room by room**: one rent, one price, one set of monthly costs, with the math behind every price.
 
-The address is the only required input. Rent and typical home value come from free public data (Zillow Research ZIP indexes), the address is matched with the US Census Geocoder, and tax/insurance use labeled state averages unless the user enters rates. No home-level facts (price, bedrooms, bathrooms, size) are asked for. Identifying the home's configuration is a goal that needs a permitted source (FR-23); until then the result describes a typical home in the ZIP and says so. Every reported number is traceable to a source or a stated assumption; missing data never silently becomes a successful-looking result.
+The address is the only required input. Rent and typical home value come from free public data (Zillow Research ZIP indexes), the address is matched with the US Census Geocoder, and tax/insurance use labeled state averages unless the user enters rates. No home-level facts (price, bedrooms, bathrooms, size) are asked for. The home's configuration and own rent come from a permitted property-data API when a key is configured (FR-23); otherwise the result describes a typical home in the ZIP and says so. Every reported number is traceable to a source or a stated assumption; missing data never silently becomes a successful-looking result.
 
 This is an informational decision-support product. Prices are the output of the user's stated criteria, not appraisals, forecasts, or personalized financial advice.
 
@@ -117,6 +117,7 @@ Priority definitions: **P0** required for the initial usable release; **P1** pla
 | FR-20 | P2 | Add risk/opportunity summaries based on traceable data or explicit rules. No unsupported “expert” claims. |
 | FR-21 | P0 | Expose `GET /healthz` returning `200 {"status":"ok","version":"<app version>"}` without calling any upstream provider, for deployment health checks (see OPS-04). |
 | FR-22 | — | Withdrawn; regression test that `property` input is rejected |
+| FR-23 | P1 | Identify the home's configuration (bedrooms, bathrooms, size, property type) and its own rent estimate from a **permitted** source and calculate prices for that specific home as one unit. Implemented with a RentCast adapter enabled only when `RENTCAST_API_KEY` is set (one request per analysis; free plan = 50/month). Any lookup failure, quota exhaustion, or missing record degrades visibly to the ZIP-typical home with the reason; it never fails the analysis and never guesses. Scraping Zillow or other listing pages is not permitted. |
 
 ### 5.2 Data and calculation requirements
 
@@ -171,7 +172,7 @@ Enforced server-side (FR-02); the UI mirrors them for convenience but is never t
 | Address, ZIP, state, county | US Census Bureau Geocoder (`geocoding.geo.census.gov`, benchmark `Public_AR_Current`), free, no key | retrieved |
 | Typical rent (ZIP) | Zillow Observed Rent Index, all homes + multifamily, smoothed, latest month, from the bundled snapshot `data/zip_market.json` (rebuilt by `scripts/update_market_data.py`) | retrieved (estimate when the user applies a rent adjustment) |
 | Typical home value (ZIP) | Zillow Home Value Index, single-family + condo, middle tier, same snapshot | retrieved |
-| Home configuration (beds, baths, size) | Not retrieved. Reported as `not_identified` with a reason. Needs a permitted source (FR-23). | unavailable |
+| Home configuration (beds, baths, size, type, year built) and the home's own rent estimate | RentCast long-term rent estimate for the Census-standardized address (`GET /v1/avm/rent/long-term`, header `X-Api-Key`), one request per analysis; fields `rent`, `rentRangeLow`, `rentRangeHigh`, `subjectProperty.{bedrooms,bathrooms,squareFootage,propertyType,yearBuilt}`. Used only when `RENTCAST_API_KEY` is set. Otherwise or on failure: `not_identified` with a reason and the ZIP-typical rent | retrieved / unavailable |
 | Property tax, insurance | State-average tables (prototype constants, **unverified**), or user-entered rates; DC/territories have no table and require entered rates | estimate, low confidence / user |
 | Vacancy | 5% of gross monthly rent | estimate |
 | Management | 8% of gross monthly rent | estimate |
@@ -434,6 +435,7 @@ Vendor responses are normalized at the boundary. Calculations operate on typed v
 | `dealscope/analysis.py` | Pure functions: mortgage payment, `compute_financials`, `max_purchase_price`, `floor_price`, `monthly_view`; `build_analysis` assembles the single `home` result with provenance | Perform I/O |
 | `dealscope/assumptions.py` | State tax/insurance tables, default rates (each labeled low-confidence) | Be imported by the provider layer |
 | `dealscope/service.py` | Orchestrates geocode → market lookup → analysis; raises domain errors | Format output |
+| `dealscope/homes.py` | `HomeRecords` interface, `RentCastHomes` adapter (one bounded request, safe error mapping, key never logged or in `repr`), `build_homes` | Fail the analysis on a lookup error or guess a field |
 | `dealscope/errors.py`, `config.py`, `ratelimit.py`, `forms.py` | Safe error mapping; env config; in-process limiter; form → payload | Include exception text in messages |
 | `data/zip_market.json`, `scripts/update_market_data.py` | Bundled Zillow Research ZIP snapshot (rent, home value, as-of dates) and its rebuild script | Be edited by hand |
 | `templates/`, `static/` | Accessible UI (§5.4), no third-party requests, works without JavaScript | Compute financial values client-side |
@@ -457,12 +459,13 @@ Every value in `analysis.property`, `analysis.assumptions`, and `analysis.metric
 | `APP_ENV` | `development` | `production` disables debug-only behavior |
 | `CORS_ORIGINS` | empty (CORS off) | Comma-separated allowed origins; empty means same-origin only |
 | `GEOCODER` | `census` | `census` (default) or `disabled` (turns address lookup off) |
+| `RENTCAST_API_KEY` | empty (feature off) | **Secret.** Host-managed (Vercel Sensitive variable). Enables home-record and rent lookup. Never commit, log, or show it |
 | `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_READ_TIMEOUT_S` | `3` / `8` | §5.5 (Census Geocoder calls) |
 | `RATE_LIMIT` | `20/minute` | §5.5; empty disables (use only behind an edge limiter) |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
 | `APP_VERSION` | `dev` | Injected at build time (git SHA); returned by `/healthz` |
 
-No variable holds a secret. Any future keyed source (for example a free Census ACS key for county-level data) is added as a host-managed secret, never in the repository.
+Only `RENTCAST_API_KEY` is a secret. Any further keyed source (for example a free Census ACS key for county-level data) is added as a host-managed secret, never in the repository.
 
 ### 6.4 Deployment architecture
 
@@ -511,9 +514,10 @@ Data sources in use and their status (owner direction 2026-10-23: free public so
 |---|---|---|
 | US Census Bureau Geocoder | Address → ZIP, state, county | US government data; free, no key. Be a polite client (timeouts, no bulk use). |
 | Zillow Research ZORI / ZHVI (public CSV downloads) | ZIP-level rent and home value, bundled as a snapshot | Published by Zillow Research for public use with attribution (shown in the app and in `sources`). **Release gate:** confirm the current terms for this deployment's use before wide public promotion or any commercial use. |
+| RentCast API (free Developer plan) | Home configuration and the home's own rent estimate | Keyed, licensed API; free plan = 50 requests/month, overage $0.20/request on that plan (cap or disable overage in the RentCast account). **Release gate:** read RentCast's terms (terms-api) for public display and caching before enabling the key in production. The address is sent to RentCast; the app discloses it. |
 | State tax/insurance tables | Estimates | Prototype constants of unknown provenance; labeled unverified. Replace with sourced data. |
 
-Not used, deliberately: Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
+Not used, deliberately: Zillow listing pages and APIs (scraping is not permitted; official access needs an approved application), Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
 
 ### Financial-content concern
 
@@ -656,7 +660,8 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | P0-1 | Owner first chose to enable the Redfin adapter, then directed address-only input from free public sources. Redfin adapter removed; Census + Zillow Research used (ADR-0005) | superseded by direction change | owner (chat) |
 | 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
 | 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
-| 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic; home configuration needs a permitted source (FR-23) | approved (owner direction); source choice pending | owner (chat) |
+| 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic | approved | owner (chat) |
+| 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; adapter built, key to be supplied by the owner | approved; key pending | owner (chat) |
 
 ### Document roles
 

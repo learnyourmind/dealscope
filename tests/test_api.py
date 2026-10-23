@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from dealscope.errors import ProviderTimeout, ProviderUnavailable
-from tests.conftest import FakeGeocoder, loc, make_client
+from dealscope.errors import ProviderRateLimited, ProviderTimeout, ProviderUnavailable
+from tests.conftest import FakeGeocoder, FakeHomes, home_record, loc, make_client
 
 BODY = {"address": "100 Example St, Austin, TX"}
 
@@ -197,3 +197,43 @@ def test_logs_exclude_address_and_body(client, caplog):
     records = [json.loads(r.getMessage()) for r in caplog.records]
     assert {"request_id", "route", "latency_ms", "error_code", "status"} <= set(records[0])
     assert records[1]["error_code"] == "OUT_OF_RANGE"
+
+
+# ── identified home ───────────────────────────────────────────────────────────────
+
+
+def test_identified_home_is_used_and_looked_up_once_with_the_matched_address(market):
+    homes = FakeHomes(home_record())
+    client = make_client(market, homes=homes)
+    resp = post(client, BODY)
+    h = resp.get_json()["analysis"]["home"]
+    assert resp.status_code == 200 and h["label"] == "This home"
+    assert h["configuration"]["status"] == "identified" and h["configuration"]["beds"]["value"] == 3
+    assert homes.calls == ["100 EXAMPLE ST, AUSTIN, TX, 78701"]  # one request, standardized address
+
+
+@pytest.mark.parametrize(
+    "error,words",
+    [
+        (ProviderRateLimited(), "quota"),
+        (ProviderTimeout(), "timed out"),
+        (ProviderUnavailable(), "unavailable"),
+    ],
+)
+def test_home_lookup_failure_degrades_to_the_zip_typical_home_not_an_error(market, error, words):
+    resp = post(make_client(market, homes=FakeHomes(error=error)), BODY)
+    a = resp.get_json()["analysis"]
+    assert resp.status_code == 200 and a["home"]["label"] == "Typical home in this ZIP"
+    assert words in a["home"]["configuration"]["beds"]["reason"]
+
+
+def test_home_not_found_degrades_with_a_reason(market):
+    resp = post(make_client(market, homes=FakeHomes(record=None)), BODY)
+    reason = resp.get_json()["analysis"]["home"]["configuration"]["beds"]["reason"]
+    assert "no record was found" in reason
+
+
+def test_geocoder_failure_still_fails_even_if_homes_would_work(market):
+    homes = FakeHomes(home_record())
+    resp = post(make_client(market, FakeGeocoder(error=ProviderTimeout()), homes), BODY)
+    assert resp.status_code == 504 and homes.calls == []  # no quota spent without a matched address

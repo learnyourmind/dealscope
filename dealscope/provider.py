@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -55,6 +55,50 @@ class ZipMarket:
     value_source: str
 
 
+def http_get_json(
+    session: requests.Session,
+    url: str,
+    params: Dict[str, Any],
+    timeouts: Tuple[float, float],
+    deadline: Optional[float] = None,
+    headers: Optional[Dict[str, str]] = None,
+    not_found_ok: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """GET JSON with bounded time and size; map every failure to a safe domain error.
+
+    Returns None for HTTP 404 when `not_found_ok`. Never puts upstream text in an error.
+    """
+    connect, read = timeouts
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProviderTimeout()
+        read = min(read, remaining)
+    try:
+        resp = session.get(url, params=params, headers=headers, timeout=(connect, read))
+    except requests.Timeout:
+        raise ProviderTimeout() from None
+    except requests.RequestException:
+        raise ProviderUnavailable() from None
+    status = resp.status_code
+    if status == 404 and not_found_ok:
+        return None
+    if status in (403, 429):
+        raise ProviderRateLimited()
+    if status >= 400:
+        raise ProviderUnavailable()
+    body = resp.content or b""
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise ProviderUnavailable()
+    try:
+        data = json.loads(body.decode("utf-8", errors="replace"))
+    except ValueError:
+        raise ProviderUnavailable() from None
+    if not isinstance(data, (dict, list)):
+        raise ProviderUnavailable()
+    return data
+
+
 class Geocoder:
     name = "base"
     enabled = True
@@ -85,30 +129,7 @@ class CensusGeocoder(Geocoder):
         self.session.headers.update({"User-Agent": _USER_AGENT})
 
     def _get_json(self, params: Dict[str, Any], deadline: Optional[float]) -> Dict:
-        connect, read = self.timeouts
-        if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ProviderTimeout()
-            read = min(read, remaining)
-        try:
-            resp = self.session.get(CENSUS_GEOCODER, params=params, timeout=(connect, read))
-        except requests.Timeout:
-            raise ProviderTimeout() from None
-        except requests.RequestException:
-            raise ProviderUnavailable() from None
-        status = resp.status_code
-        if status in (403, 429):
-            raise ProviderRateLimited()
-        if status >= 400:
-            raise ProviderUnavailable()
-        body = resp.content or b""
-        if len(body) > MAX_RESPONSE_BYTES:
-            raise ProviderUnavailable()
-        try:
-            data = json.loads(body.decode("utf-8", errors="replace"))
-        except ValueError:
-            raise ProviderUnavailable() from None
+        data = http_get_json(self.session, CENSUS_GEOCODER, params, self.timeouts, deadline)
         if not isinstance(data, dict):
             raise ProviderUnavailable()
         return data

@@ -19,13 +19,14 @@ The central workflow: **enter an address → see local rent and typical home val
 
 ## Inputs: the address is the only thing the user provides
 
-The only required input is a US address. DealScope must not ask users to type property facts (price, bedrooms, square footage) that the product could look up itself. The home is always evaluated **as one whole rental unit — never room by room**: one rent, one purchase price, one set of monthly costs. The goal is to identify the home's configuration (bedrooms, bathrooms, size) from a permitted source and compute rent and prices for that specific home. Until a permitted source is configured, the configuration is shown as "not identified" and the result describes a typical home in the ZIP, treated as a single unit. Financing and cost assumptions are optional, have visible defaults, and are tucked behind an "adjust assumptions" control.
+The only required input is a US address. DealScope must not ask users to type property facts (price, bedrooms, square footage) that the product could look up itself. The home is always evaluated **as one whole rental unit — never room by room**: one rent, one purchase price, one set of monthly costs. The product identifies the home's configuration (bedrooms, bathrooms, size, type) from a permitted property-data source (RentCast's free Developer plan, with its key held as a host secret) and uses that home's own rent estimate, so the result is for the specific home as a single unit. When no source is configured, its quota is used up, or no record exists, the configuration is shown as "not identified" with the reason, and the result describes a typical home in the ZIP, still as a single unit. Financing and cost assumptions are optional, have visible defaults, and are tucked behind an "adjust assumptions" control.
 
 ## Data principle: free, public, permitted sources
 
 Use free public data whose terms allow the use, and show attribution and "as of" dates:
 
 - US Census Bureau Geocoder — address matching, ZIP, state, county.
+- RentCast property records and rent estimate (free Developer plan, 50 requests per month; key required) — the home's bedrooms, bathrooms, size, type, and rent estimate, one request per analysis.
 - Zillow Research public indexes (observed rent index and home value index) by ZIP.
 - State-average tax and insurance tables, labeled as low-confidence estimates until replaced by sourced data.
 
@@ -36,11 +37,11 @@ Do not scrape listing sites, use unofficial endpoints without a terms review, or
 Implemented now:
 
 - Address-only search with a clear, modern interface.
-- ZIP-level typical rent and typical home value (public data) for one whole-home unit, and three prices: **PITI break-even**, **all-in break-even**, and **target price** (meets the user's monthly cash-flow goal).
+- One whole-home unit: when the home's record is available, its own configuration and rent estimate; otherwise the ZIP-level typical rent. Typical home value for the ZIP (public data) as context. Three prices: **PITI break-even**, **all-in break-even**, and **target price** (meets the user's monthly cash-flow goal).
 - The monthly math at each price (PITI broken out; other costs; cash flow), plus cap rate and cash-on-cash at the target price.
 - Visible assumptions, sources, and limitations; unknown values shown as unknown.
 
-Planned (goals, not claims): identify the actual home's configuration and use its own rent and value estimate (needs a permitted source — Zillow listing pages and APIs are not available to us without a license, so a licensed or free-tier property-data API is the likely path), county-level property tax, comparable sales and price history, market snapshot, longer-term scenarios, user-defined buy-box criteria beyond cash flow, and sourced risk and opportunity summaries.
+Planned (goals, not claims): the home's own property tax from county records (an extra request per analysis), the home's own value estimate, county-level tax data, comparable sales and price history, market snapshot, longer-term scenarios, user-defined buy-box criteria beyond cash flow, and sourced risk and opportunity summaries. Zillow listing pages and APIs are not used: scraping is not permitted and their official APIs require an approved application.
 
 ## Product principles
 
@@ -68,12 +69,12 @@ For a new or changed analysis feature, check that:
 
 ## Current known limitations
 
-- Rent is a ZIP-level typical rent across all home sizes, not a quote for a specific property, and the home's configuration is not identified. The rent index lags the market by weeks and is smoothed.
+- With a property-data key, rent is an automated estimate for the address (with a range), not a quote. Without a key, when the monthly quota is used up, or when no record exists, rent is the ZIP-level typical rent across homes and the configuration is not identified. The free plan allows only 50 lookups a month.
 - Property tax and insurance use state-average constants carried over from the prototype (unverified) unless the user enters rates. Actual bills vary by county, assessment, and property. DC and territories have no table and require entered rates.
-- Home-level facts (bedrooms, bathrooms, size, condition, list price) and county assessor records are not retrieved; no permitted free national source is configured.
+- Condition, list price, and county assessor records are not retrieved. Records can be wrong or missing; multi-unit records give a single-unit rent estimate.
 - Some ZIPs (PO box, institutional, tiny areas) have no rent data and return "insufficient data".
 - Vacancy, management, and maintenance reserve are fixed default assumptions.
-- Address matching uses the Census Geocoder, which can be slow or unavailable; the address is sent to it.
+- Address matching uses the Census Geocoder, which can be slow or unavailable; the address is sent to it, and to RentCast when a key is configured.
 - Analyses are not stored (no database). The built-in rate limit is per process.
 
 These limitations should be addressed explicitly when relevant to a feature; they should not be obscured by more confident UI language.

@@ -117,7 +117,7 @@
 
     <div class="headline" role="group" aria-label="Headline result">
       <div class="big">
-        <span class="label">Target purchase price · typical home in this ZIP</span>
+        <span class="label">Target purchase price · {{ top.label | lower }}</span>
         <span class="num">{% if top.prices.target.kind == 'unavailable' %}Not reachable{% else %}Up to {{ top.prices.target.value | usd(false) }}{% endif %}</span>
         <span class="sub">
           {% if top.prices.target.kind == 'unavailable' %}Typical rent here is too low to reach a {{ a.assumptions.min_monthly_cash_flow.value | usd(false) }}/mo cash flow at any price.
@@ -180,10 +180,12 @@
         <h4 id="c-config">Home configuration</h4>
         <dl class="cfg">
           <div><dt>Bedrooms</dt><dd>{% if top.configuration.beds.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.beds.value }}{% endif %}</dd></div>
-          <div><dt>Bathrooms</dt><dd>{% if top.configuration.baths.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.baths.value }}{% endif %}</dd></div>
-          <div><dt>Size</dt><dd>{% if top.configuration.sqft.kind == 'unavailable' %}Not identified{% else %}{{ top.configuration.sqft.value }} sq ft{% endif %}</dd></div>
+          <div><dt>Bathrooms</dt><dd>{% if top.configuration.baths.kind == 'unavailable' %}Not identified{% else %}{{ '%g' | format(top.configuration.baths.value) }}{% endif %}</dd></div>
+          <div><dt>Size</dt><dd>{% if top.configuration.sqft.kind == 'unavailable' %}Not identified{% else %}{{ '{:,}'.format(top.configuration.sqft.value) }} sq ft{% endif %}</dd></div>
+          {% if top.configuration.property_type and top.configuration.property_type.kind != 'unavailable' %}<div><dt>Type</dt><dd>{{ top.configuration.property_type.value }}</dd></div>{% endif %}
+          {% if top.configuration.year_built and top.configuration.year_built.kind != 'unavailable' %}<div><dt>Built</dt><dd>{{ top.configuration.year_built.value }}</dd></div>{% endif %}
         </dl>
-        <p class="small muted">{{ top.configuration.beds.reason or top.configuration.note }}</p>
+        <p class="small muted">{% if top.configuration.status == 'identified' %}From the property record for this address. {{ top.configuration.note }}{% else %}{{ top.configuration.beds.reason }}{% endif %}</p>
       </article>
     </div>
 
@@ -223,7 +225,7 @@
 <footer class="foot">
   <div class="wrap small muted">
     <p>DealScope is decision support for a first look. It does not give financial, tax, legal, insurance, appraisal, or lending advice and does not predict returns. Verify rents, taxes, insurance and condition locally before deciding.</p>
-    <p>{% if lookup_enabled %}The address you enter is sent to the US Census Bureau Geocoder to find its ZIP code.{% else %}Address lookup is off; nothing is sent to third parties.{% endif %} Nothing you enter is stored. Rent and home-value indexes: Zillow Research data. Version {{ version }}.</p>
+    <p>{% if lookup_enabled %}The address you enter is sent to the US Census Bureau Geocoder to find its ZIP code{% if homes_enabled %} and to RentCast to look up the home's details and rent estimate{% endif %}.{% else %}Address lookup is off; nothing is sent to third parties.{% endif %} Nothing you enter is stored. Area rent and home-value indexes: Zillow Research data. Version {{ version }}.</p>
   </div>
 </footer>
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>

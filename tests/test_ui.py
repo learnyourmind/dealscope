@@ -1,6 +1,6 @@
 from dealscope.errors import ProviderTimeout
 from dealscope.ratelimit import RateLimiter, parse_rate
-from tests.conftest import FakeGeocoder, loc, make_client
+from tests.conftest import FakeGeocoder, FakeHomes, home_record, loc, make_client
 
 FORM = {
     "address": "100 Example St, Austin, TX",
@@ -123,3 +123,19 @@ def test_scrollable_table_wrapper_is_keyboard_focusable(client):
     # axe "scrollable-region-focusable": an overflow container needs a tab stop and a name.
     html = client.post("/", data=FORM).get_data(as_text=True)
     assert 'class="tablewrap" tabindex="0" role="region" aria-label=' in html
+
+
+def test_identified_home_details_are_shown(market):
+    client = make_client(market, homes=FakeHomes(home_record()))
+    html = client.post("/", data=FORM).get_data(as_text=True)
+    assert (
+        "This home" in html and "1,850 sq ft" in html and "Single Family" in html and "1998" in html
+    )
+    assert "From the property record for this address" in html
+    assert "Not identified" not in html and "RentCast" in html
+
+
+def test_privacy_footer_names_rentcast_only_when_it_is_enabled(market, client):
+    on = make_client(market, homes=FakeHomes(home_record())).get("/").get_data(as_text=True)
+    off = client.get("/").get_data(as_text=True)
+    assert "and to RentCast" in on and "RentCast" not in off

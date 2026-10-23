@@ -4,6 +4,7 @@ import pytest
 
 from app import create_app
 from dealscope.config import Config
+from dealscope.homes import HomeRecord, HomeRecords
 from dealscope.provider import Geocoder, Location, MarketData
 
 DATA = {
@@ -48,9 +49,41 @@ def market(tmp_path):
     return MarketData(path)
 
 
-def make_client(market, geocoder=None, **config):
+def home_record(**overrides):
+    fields = dict(
+        address="100 Example St, Austin, TX, 78701",
+        rent=2800.0,
+        rent_low=2500.0,
+        rent_high=3100.0,
+        beds=3,
+        baths=2.0,
+        sqft=1850,
+        property_type="Single Family",
+        year_built=1998,
+    )
+    fields.update(overrides)
+    return HomeRecord(**fields)
+
+
+class FakeHomes(HomeRecords):
+    """Test double for the property-data source: returns `record` or raises `error`."""
+
+    name = "fake"
+    enabled = True
+
+    def __init__(self, record=None, error=None):
+        self.record, self.error, self.calls = record, error, []
+
+    def lookup(self, address, deadline=None):
+        self.calls.append(address)
+        if self.error:
+            raise self.error
+        return self.record
+
+
+def make_client(market, geocoder=None, homes=None, **config):
     cfg = Config(rate_limit=config.pop("rate_limit", ""), **config)
-    app = create_app(cfg, geocoder or FakeGeocoder(), market)
+    app = create_app(cfg, geocoder or FakeGeocoder(), market, homes)
     app.config["TESTING"] = False  # exercise real error handlers
     return app.test_client()
 
