@@ -1,11 +1,9 @@
-"""State-level benchmark tables and default operating assumptions.
+"""State-level insurance/tax benchmark tables and default assumptions.
 
 These are rough state averages carried over from the prototype. They have NOT been
 independently re-sourced, are not property-specific, and must always be presented as
 low-confidence estimates (spec §5.2).
 """
-
-from typing import Optional, Tuple
 
 SOURCE = "Prototype state-average constants (not independently verified)"
 AS_OF = "carried over from the initial prototype; undated"
@@ -114,85 +112,19 @@ INS_RATES = {
     "WI": 0.56,
     "WY": 0.50,
 }
-RENT_PRICE_RATIO = {
-    "TX": 0.0070,
-    "FL": 0.0082,
-    "AZ": 0.0075,
-    "GA": 0.0078,
-    "NC": 0.0074,
-    "OH": 0.0098,
-    "MI": 0.0095,
-    "PA": 0.0082,
-    "IL": 0.0079,
-    "CO": 0.0062,
-    "WA": 0.0060,
-    "CA": 0.0052,
-    "NY": 0.0058,
-    "NV": 0.0070,
-    "TN": 0.0078,
-    "VA": 0.0065,
-    "SC": 0.0076,
-    "MO": 0.0085,
-    "IN": 0.0090,
-    "KY": 0.0088,
-    "AL": 0.0085,
-    "MS": 0.0090,
-    "AR": 0.0088,
-    "LA": 0.0080,
-}
-STATE_COST = {
-    "TX": 1.05,
-    "FL": 1.18,
-    "CA": 1.95,
-    "NY": 1.80,
-    "CO": 1.40,
-    "WA": 1.50,
-    "AZ": 1.10,
-    "GA": 1.02,
-    "NC": 0.95,
-    "OH": 0.88,
-    "MI": 0.85,
-    "IL": 1.08,
-    "PA": 0.97,
-    "NV": 1.12,
-    "TN": 0.90,
-    "VA": 1.15,
-    "SC": 0.93,
-    "NJ": 1.55,
-    "MA": 1.65,
-    "MD": 1.25,
-    "OR": 1.28,
-}
-BASE_RENTS = {1: 1100, 2: 1420, 3: 1850, 4: 2300, 5: 2900}
 
 STATES = frozenset(TAX_RATES)
 
-# Fallbacks when a state is missing from the rent tables only. Always disclosed in the basis text.
-DEFAULT_RENT_PRICE_RATIO = 0.007
-DEFAULT_STATE_COST = 1.0
+# Bedroom scaling of the ZIP's typical rent. Prototype benchmark rents by bedroom count
+# (1BR $1,100 ... 4BR $2,300) divided by their 2BR/3BR midpoint ($1,635), which stands in for
+# "typical". A rough, unverified heuristic: always shown as a low-confidence estimate.
+BEDROOM_RENT_FACTORS = {1: 0.67, 2: 0.87, 3: 1.13, 4: 1.41}
+BEDROOM_FACTOR_BASIS = (
+    "Typical ZIP rent scaled by a rough bedroom factor "
+    "(1BR 0.67, 2BR 0.87, 3BR 1.13, 4BR 1.41) from prototype benchmarks; not market data."
+)
 
 # Default operating assumptions (spec §5.2).
 VACANCY_PCT = 5.0
 MANAGEMENT_PCT = 8.0
 CAPEX_PCT_OF_PRICE_PER_YEAR = 1.0
-
-
-def estimate_rent(price: float, beds: int, state: str) -> Optional[Tuple[int, str]]:
-    """Blend of rent-to-price and bedroom benchmarks, rounded to $25, or None if unsupported."""
-    base = BASE_RENTS.get(beds)
-    if base is None:
-        return None
-    ratio = RENT_PRICE_RATIO.get(state)
-    cost = STATE_COST.get(state)
-    note = ""
-    if ratio is None or cost is None:
-        note = f" No {state} benchmark in our tables, so national fallback values were used."
-        ratio = DEFAULT_RENT_PRICE_RATIO if ratio is None else ratio
-        cost = DEFAULT_STATE_COST if cost is None else cost
-    rent = round((price * ratio * 0.5 + base * cost * 0.5) / 25) * 25
-    basis = (
-        f"50% price × {ratio:.4f} rent-to-price ratio + 50% {beds}-bedroom benchmark "
-        f"${base:,} × {cost:.2f} cost index, rounded to $25. A state-level benchmark, "
-        f"not a market quote.{note}"
-    )
-    return int(rent), basis

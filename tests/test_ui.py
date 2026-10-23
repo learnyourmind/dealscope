@@ -1,17 +1,13 @@
-from dealscope.provider import Candidate
+from dealscope.errors import ProviderTimeout
 from dealscope.ratelimit import RateLimiter, parse_rate
-from tests.conftest import FakeProvider, make_client, retrieved_facts
+from tests.conftest import FakeGeocoder, loc, make_client
 
 FORM = {
     "address": "100 Example St, Austin, TX",
-    "purchase_price": "400,000",
-    "beds": "3",
-    "state": "tx",
-    "hoa_monthly": "0",
     "down_payment_pct": "20",
     "annual_interest_rate_pct": "7",
     "loan_term_years": "30",
-    "monthly_rent": "2800",
+    "min_monthly_cash_flow": "100",
 }
 
 
@@ -19,23 +15,21 @@ def test_form_post_renders_results_without_javascript(client):
     resp = client.post("/", data=FORM)
     html = resp.get_data(as_text=True)
     assert resp.status_code == 200
-    assert "Results for 100 Example St, Austin, TX" in html
-    assert "−$1,086.30" in html and "3.13%" in html and "−16.29%" in html
-    assert "Negative" in html  # status is text, not color alone
-    assert "You entered" in html and "Estimate" in html
-    assert "No buy/sell recommendation" in html and "Not advice" in html
+    assert "Up to $" in html and "By bedroom count" in html and "PITI break-even" in html
+    assert "Public data" in html and "Estimate" in html  # source type shown for every figure
+    assert "Monthly math at the target price" in html and "PITI total" in html
+    assert "ZIP 78701" in html and "Zillow" in html and "Census" in html
 
 
-def test_unavailable_values_are_labeled_not_zero(client):
-    data = dict(FORM, hoa_monthly="", beds="7", monthly_rent="")
-    html = client.post("/", data=data).get_data(as_text=True)
-    assert "Unavailable" in html
-    assert "(qualified)" not in html  # nothing to qualify when rent is withheld
+def test_unknown_hoa_note_is_shown_and_known_hoa_hides_it(client):
+    assert "HOA is unknown" in client.post("/", data=FORM).get_data(as_text=True)
+    html = client.post("/", data=dict(FORM, hoa_monthly="200")).get_data(as_text=True)
+    assert "HOA is unknown" not in html
 
 
-def test_missing_hoa_marks_results_qualified(client):
-    html = client.post("/", data=dict(FORM, hoa_monthly="")).get_data(as_text=True)
-    assert "(qualified)" in html and "HOA fees were unavailable" in html
+def test_unreachable_target_is_explained(client):
+    html = client.post("/", data=dict(FORM, min_monthly_cash_flow="10000")).get_data(as_text=True)
+    assert "Not reachable" in html
 
 
 def test_validation_error_preserves_inputs_and_is_announced(client):
@@ -47,51 +41,60 @@ def test_validation_error_preserves_inputs_and_is_announced(client):
 
 
 def test_non_numeric_form_input_is_a_clear_error(client):
-    resp = client.post("/", data=dict(FORM, purchase_price="lots"))
+    resp = client.post("/", data=dict(FORM, hoa_monthly="lots"))
     assert resp.status_code == 400 and "must be a number" in resp.get_data(as_text=True)
 
 
-def test_disabled_lookup_shows_manual_fields_required(client):
+def test_currency_symbols_and_commas_are_accepted(client):
+    resp = client.post("/", data=dict(FORM, min_monthly_cash_flow="$1,000", hoa_monthly="$150"))
+    assert resp.status_code == 200
+
+
+def test_disabled_lookup_is_explained(market):
+    from dealscope.provider import DisabledGeocoder
+
+    client = make_client(market, DisabledGeocoder())
     html = client.get("/").get_data(as_text=True)
-    assert "Automatic property lookup is turned off" in html
-    assert 'id="purchase_price"' in html and "required" in html
-    assert "not sent to any third party" in html
+    assert "Address lookup is switched off" in html
+    resp = client.post("/", data=FORM)
+    assert resp.status_code == 502 and "turned off" in resp.get_data(as_text=True)
 
 
-def test_ambiguous_match_shows_chooser_and_selection_works():
-    provider = FakeProvider(
-        candidates=[
-            Candidate("1", "1 A St, Austin, TX"),
-            Candidate("2", "1 A St Unit 2, Austin, TX"),
-        ],
-        facts=retrieved_facts(),
-    )
-    client = make_client(provider)
-    resp = client.post("/", data={"address": "1 A St", "down_payment_pct": "20"})
+def test_ambiguous_match_shows_picks_and_selection_works(market):
+    geo = FakeGeocoder([loc("1 A ST, AUSTIN, TX, 78701"), loc("1 A ST, AUSTIN, TX, 78702")])
+    client = make_client(market, geo)
+    resp = client.post("/", data=dict(FORM, address="1 A St"))
     html = resp.get_data(as_text=True)
-    assert resp.status_code == 422 and "Choose the right property" in html
-    assert 'name="candidate_id" value="2"' in html
-    assert "sent to the property data provider" in html
+    assert resp.status_code == 422 and "Which address did you mean?" in html
+    assert 'name="pick" value="1 A ST, AUSTIN, TX, 78702"' in html
 
-    chosen = client.post("/", data={"address": "1 A St", "candidate_id": "2"})
-    assert chosen.status_code == 200 and "Results for" in chosen.get_data(as_text=True)
+    geo.locations = [loc("1 A ST, AUSTIN, TX, 78702", zip="78701")]
+    chosen = client.post("/", data=dict(FORM, pick="1 A ST, AUSTIN, TX, 78702"))
+    assert chosen.status_code == 200 and "Results" in chosen.get_data(as_text=True)
+    assert geo.calls[-1] == "1 A ST, AUSTIN, TX, 78702"  # the pick replaced the typed address
 
 
-def test_provider_error_shows_retry_guidance_and_reference():
-    from dealscope.errors import ProviderTimeout
-
-    client = make_client(FakeProvider(error=ProviderTimeout()))
-    resp = client.post("/", data={"address": "100 Example St"})
+def test_provider_error_shows_retry_guidance_and_reference(market):
+    client = make_client(market, FakeGeocoder(error=ProviderTimeout()))
+    resp = client.post("/", data=FORM)
     html = resp.get_data(as_text=True)
-    assert resp.status_code == 504 and "try again" in html and "Reference:" in html
+    assert resp.status_code == 504 and "try again" in html.lower() and "Reference:" in html
 
 
 def test_page_has_accessibility_basics(client):
     html = client.get("/").get_data(as_text=True)
     assert '<html lang="en">' in html and 'class="skip"' in html and "<main" in html
     assert html.count("<h1") == 1
-    for field in ("address", "down_payment_pct", "annual_interest_rate_pct", "loan_term_years"):
+    for field in (
+        "address",
+        "down_payment_pct",
+        "annual_interest_rate_pct",
+        "loan_term_years",
+        "min_monthly_cash_flow",
+        "hoa_monthly",
+    ):
         assert f'for="{field}"' in html
+    assert "fonts.googleapis" not in html and "cdn." not in html  # no third-party requests
 
 
 def test_user_input_is_escaped(client):

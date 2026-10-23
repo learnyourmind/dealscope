@@ -3,239 +3,218 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DealScope — first-pass rental property analysis</title>
-  <meta name="description" content="Estimate rent, operating costs, cash flow, NOI and cap rate for a US residential rental property. For information only.">
+  <meta name="color-scheme" content="dark light">
+  <title>DealScope — what can you pay for a rental?</title>
+  <meta name="description" content="Enter an address. DealScope estimates the most you can pay for a rental property so rent covers mortgage, tax and insurance. For information only.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2310b981'/%3E%3Cpath d='M16 7 7 15h3v9h12v-9h3z' fill='%23041' /%3E%3C/svg%3E">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
 {% macro kind_label(kind) -%}
-  {%- if kind == 'retrieved' %}Retrieved
+  {%- if kind == 'retrieved' %}Public data
   {%- elif kind == 'user' %}You entered
   {%- elif kind == 'estimate' %}Estimate
   {%- else %}Unavailable{% endif -%}
 {%- endmacro %}
 
-{% macro fmt(item, style) -%}
-  {%- if item.kind == 'unavailable' %}Unavailable
-  {%- elif style == 'usd' %}{{ item.value | usd }}
-  {%- elif style == 'usd0' %}{{ item.value | usd(false) }}
-  {%- elif style == 'pct' %}{{ item.value | pct }}
-  {%- else %}{{ item.value }}{% endif -%}
+{% macro money(item) -%}
+  {%- if item.kind == 'unavailable' %}Unavailable{% else %}{{ item.value | usd(false) }}{% endif -%}
 {%- endmacro %}
-
-{% macro row(label, item, style='usd') %}
-  <tr>
-    <th scope="row">{{ label }}</th>
-    <td class="num">{{ fmt(item, style) }}{% if item.qualified %} <span class="flag">(qualified)</span>{% endif %}</td>
-    <td>{{ kind_label(item.kind) }}</td>
-    <td>
-      <details>
-        <summary>Basis</summary>
-        <p>{{ item.basis or item.source or item.reason or '' }}
-        {% if item.note %}<br>{{ item.note }}{% endif %}
-        {% if item.retrieved_at %}<br>Retrieved {{ item.retrieved_at }}.{% endif %}</p>
-      </details>
-    </td>
-  </tr>
-{% endmacro %}
 
 <a class="skip" href="#main">Skip to main content</a>
 
-<header class="site">
-  <div class="wrap">
-    <p class="brand">DealScope</p>
-    <p class="tag">First-pass rental property estimates. Informational only.</p>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="{{ url_for('index') }}" aria-label="DealScope home">
+      <svg class="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 7.5 7.5 15H10v8.5h12V15h2.5z" fill="#04251b"/><circle cx="16" cy="18.5" r="2.4" fill="#34d399"/></svg>
+      <span>DealScope</span>
+    </a>
+    <p class="pill">Informational only · not advice</p>
   </div>
 </header>
 
-<main id="main" class="wrap" tabindex="-1">
-  <h1>Check a rental property</h1>
-  <p class="lead">Enter an address and your financing assumptions to see estimated rent, monthly costs, cash flow, NOI and cap rate. Every number shows whether it was retrieved, entered by you, or estimated.</p>
-  <p class="notice" role="note"><strong>Not advice.</strong> DealScope does not give financial, tax, legal, insurance, appraisal, or lending advice and does not predict returns. Estimates rely on state averages, not quotes for this property. Verify everything locally before deciding.</p>
+<main id="main" tabindex="-1">
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Rental buy-box calculator</p>
+      <h1>What can you pay for a rental, given the rent it earns?</h1>
+      <p class="lead">Type an address. We look up local rents from public data and work backwards to the highest price where rent still covers your mortgage, property tax and insurance.</p>
 
-  {% if error %}
-  <div class="alert" role="alert" id="error-summary" tabindex="-1">
-    <h2>{% if error.code == 'AMBIGUOUS_MATCH' %}Choose the right property{% else %}We couldn't complete that analysis{% endif %}</h2>
-    <p>{{ error.message }}{% if error.field %} (field: {{ error.field }}){% endif %}</p>
-    {% if error.retryable %}<p>This may be temporary. Your entries are kept — try again.</p>{% endif %}
-    {% if error.request_id %}<p class="small">Reference: {{ error.request_id }}</p>{% endif %}
-  </div>
-  {% endif %}
-
-  <form method="post" action="{{ url_for('index') }}" id="analyze-form" novalidate>
-    <fieldset>
-      <legend>Property</legend>
-      <div class="field">
-        <label for="address">US property address</label>
-        <input id="address" name="address" type="text" required maxlength="200" autocomplete="street-address"
-               value="{{ form.address }}" placeholder="123 Main St, Austin, TX"
-               {% if error and error.field == 'address' %}aria-invalid="true" aria-describedby="error-summary"{% endif %}>
-      </div>
-
-      {% if error and error.code == 'AMBIGUOUS_MATCH' %}
-      <div class="candidates" role="group" aria-labelledby="cand-h">
-        <h2 id="cand-h">Matching properties</h2>
-        <ul>
+      {% if error %}
+      <div class="alert" role="alert" id="error-summary" tabindex="-1">
+        <h2>{% if error.code == 'AMBIGUOUS_MATCH' %}Which address did you mean?{% else %}We couldn't complete that analysis{% endif %}</h2>
+        <p>{{ error.message }}{% if error.field %} <span class="muted">(field: {{ error.field }})</span>{% endif %}</p>
+        {% if error.retryable %}<p>This may be temporary — your entries are kept. Try again.</p>{% endif %}
+        {% if error.code == 'AMBIGUOUS_MATCH' %}
+        <ul class="picks">
           {% for c in error.candidates %}
-          <li><button type="submit" name="candidate_id" value="{{ c.id }}">{{ c.display }}</button></li>
+          <li><button type="submit" form="analyze-form" name="pick" value="{{ c.id }}" class="ghost">{{ c.display }}</button></li>
           {% endfor %}
         </ul>
+        {% endif %}
+        {% if error.request_id %}<p class="small muted">Reference: {{ error.request_id }}</p>{% endif %}
       </div>
       {% endif %}
 
-      {% if not provider_enabled %}
-      <p class="info">Automatic property lookup is turned off in this deployment. Enter the property details below; they are treated as your own assumptions.</p>
-      {% endif %}
+      <form method="post" action="{{ url_for('index') }}" id="analyze-form" class="search" novalidate>
+        <div class="searchrow">
+          <label for="address" class="sr">US property address</label>
+          <svg class="mag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"/></svg>
+          <input id="address" name="address" type="text" required maxlength="200" autocomplete="street-address"
+                 value="{{ form.address }}" placeholder="123 Main St, Austin, TX"
+                 {% if error and error.field == 'address' %}aria-invalid="true" aria-describedby="error-summary"{% endif %}>
+          <button type="submit" class="primary" id="submit-btn">Find my number</button>
+        </div>
+        <p id="status" class="small muted" role="status" aria-live="polite"></p>
 
-      <details class="manual" {% if not provider_enabled or (error and error.manual_entry_required) or form.purchase_price or form.beds or form.state %}open{% endif %}>
-        <summary>{% if provider_enabled %}Enter property details manually{% else %}Property details{% endif %}</summary>
-        <div class="grid">
-          <div class="field">
-            <label for="purchase_price">Purchase price (USD)</label>
-            <input id="purchase_price" name="purchase_price" type="text" inputmode="decimal"
-                   value="{{ form.purchase_price or '' }}" {% if not provider_enabled %}required{% endif %}>
-            <p class="hint">{{ bounds.PRICE_MIN | usd(false) }}–{{ bounds.PRICE_MAX | usd(false) }}</p>
+        <details class="adv" {% if error and error.field or error and error.needs_rates %}open{% endif %}>
+          <summary><span>Adjust assumptions</span><span class="muted small">financing, cash-flow goal, costs</span></summary>
+          <div class="grid">
+            <div class="field"><label for="down_payment_pct">Down payment (%)</label>
+              <input id="down_payment_pct" name="down_payment_pct" type="text" inputmode="decimal" value="{{ form.down_payment_pct }}">
+              <p class="hint">{{ bounds.DOWN_PCT_MIN | int }}–{{ bounds.DOWN_PCT_MAX | int }}</p></div>
+            <div class="field"><label for="annual_interest_rate_pct">Interest rate (% / year)</label>
+              <input id="annual_interest_rate_pct" name="annual_interest_rate_pct" type="text" inputmode="decimal" value="{{ form.annual_interest_rate_pct }}">
+              <p class="hint">{{ bounds.RATE_MIN | int }}–{{ bounds.RATE_MAX | int }}</p></div>
+            <div class="field"><label for="loan_term_years">Loan term</label>
+              <select id="loan_term_years" name="loan_term_years">
+                {% for t in bounds.LOAN_TERMS %}<option value="{{ t }}" {% if form.loan_term_years | string == t | string %}selected{% endif %}>{{ t }} years</option>{% endfor %}
+              </select></div>
+            <div class="field"><label for="min_monthly_cash_flow">Cash flow goal (USD / month)</label>
+              <input id="min_monthly_cash_flow" name="min_monthly_cash_flow" type="text" inputmode="decimal" value="{{ form.min_monthly_cash_flow }}">
+              <p class="hint">Profit you want after all costs</p></div>
+            <div class="field"><label for="rent_adjustment_pct">Rent adjustment (%)</label>
+              <input id="rent_adjustment_pct" name="rent_adjustment_pct" type="text" inputmode="decimal" value="{{ form.rent_adjustment_pct or '' }}" placeholder="0">
+              <p class="hint">Raise or lower the public-data rent</p></div>
+            <div class="field"><label for="property_tax_rate_pct">Property tax rate (% / year)</label>
+              <input id="property_tax_rate_pct" name="property_tax_rate_pct" type="text" inputmode="decimal" value="{{ form.property_tax_rate_pct or '' }}" placeholder="state average"
+                     {% if error and error.needs_rates %}aria-invalid="true"{% endif %}>
+              <p class="hint">Blank = state average</p></div>
+            <div class="field"><label for="insurance_rate_pct">Insurance rate (% / year)</label>
+              <input id="insurance_rate_pct" name="insurance_rate_pct" type="text" inputmode="decimal" value="{{ form.insurance_rate_pct or '' }}" placeholder="state average"
+                     {% if error and error.needs_rates %}aria-invalid="true"{% endif %}>
+              <p class="hint">Blank = state average</p></div>
+            <div class="field"><label for="hoa_monthly">HOA (USD / month)</label>
+              <input id="hoa_monthly" name="hoa_monthly" type="text" inputmode="decimal" value="{{ form.hoa_monthly or '' }}" placeholder="unknown">
+              <p class="hint">Blank = unknown, counted as $0</p></div>
           </div>
-          <div class="field">
-            <label for="beds">Bedrooms</label>
-            <input id="beds" name="beds" type="text" inputmode="numeric" value="{{ form.beds or '' }}"
-                   {% if not provider_enabled %}required{% endif %}>
-            <p class="hint">Whole number. Rent estimates cover 1–5.</p>
-          </div>
-          <div class="field">
-            <label for="state">State (2 letters)</label>
-            <input id="state" name="state" type="text" maxlength="2" autocapitalize="characters"
-                   value="{{ form.state or '' }}" {% if not provider_enabled %}required{% endif %}>
-          </div>
-          <div class="field">
-            <label for="hoa_monthly">HOA fee (USD/month, optional)</label>
-            <input id="hoa_monthly" name="hoa_monthly" type="text" inputmode="decimal" value="{{ form.hoa_monthly or '' }}">
-            <p class="hint">Leave blank if unknown; results are then marked qualified.</p>
-          </div>
-        </div>
-      </details>
-    </fieldset>
-
-    <fieldset>
-      <legend>Financing and rent assumptions</legend>
-      <div class="grid">
-        <div class="field">
-          <label for="down_payment_pct">Down payment (%)</label>
-          <input id="down_payment_pct" name="down_payment_pct" type="text" inputmode="decimal" value="{{ form.down_payment_pct }}">
-          <p class="hint">{{ bounds.DOWN_PCT_MIN | int }}–{{ bounds.DOWN_PCT_MAX | int }}</p>
-        </div>
-        <div class="field">
-          <label for="annual_interest_rate_pct">Interest rate (% per year)</label>
-          <input id="annual_interest_rate_pct" name="annual_interest_rate_pct" type="text" inputmode="decimal" value="{{ form.annual_interest_rate_pct }}">
-          <p class="hint">{{ bounds.RATE_MIN | int }}–{{ bounds.RATE_MAX | int }}</p>
-        </div>
-        <div class="field">
-          <label for="loan_term_years">Loan term</label>
-          <select id="loan_term_years" name="loan_term_years">
-            {% for t in bounds.LOAN_TERMS %}
-            <option value="{{ t }}" {% if form.loan_term_years | string == t | string %}selected{% endif %}>{{ t }} years</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label for="monthly_rent">Your monthly rent estimate (USD, optional)</label>
-          <input id="monthly_rent" name="monthly_rent" type="text" inputmode="decimal" value="{{ form.monthly_rent or '' }}">
-          <p class="hint">Leave blank to use the model estimate.</p>
-        </div>
-      </div>
-    </fieldset>
-
-    <button type="submit" class="primary" id="submit-btn">Analyze property</button>
-    <p id="status" class="small" role="status" aria-live="polite"></p>
-  </form>
+        </details>
+      </form>
+      {% if not lookup_enabled %}<p class="info">Address lookup is switched off in this deployment.</p>{% endif %}
+    </div>
+  </section>
 
   {% if analysis %}
-  {% set m = analysis.metrics %}
-  <section aria-labelledby="results-h" class="results">
-    <h2 id="results-h" tabindex="-1">Results for {{ analysis.property.address.value }}</h2>
-    <p class="small">Generated {{ analysis.generated_at }}. Monthly figures unless stated. "NOI" means net operating income: rent after vacancy minus operating costs, before mortgage payments.</p>
+  {% set a = analysis %}
+  {% set top = a.scenarios[0] %}
+  {% set ns = namespace(max=1) %}
+  {% for sc in a.scenarios %}{% for k, p in sc.prices.items() %}{% if p.kind != 'unavailable' and p.value > ns.max %}{% set ns.max = p.value %}{% endif %}{% endfor %}{% endfor %}
 
-    <div class="summary" role="list">
-      <div role="listitem"><span class="k">Estimated rent</span><span class="v">{{ fmt(analysis.breakdown.gross_rent, 'usd0') }}<small>/mo</small></span><span class="s">{{ kind_label(analysis.breakdown.gross_rent.kind) }}</span></div>
-      <div role="listitem"><span class="k">Monthly cash flow</span><span class="v">{{ fmt(m.monthly_cash_flow, 'usd') }}</span><span class="s">{% if m.monthly_cash_flow.kind != 'unavailable' %}{{ 'Positive' if m.monthly_cash_flow.value > 0 else ('Negative' if m.monthly_cash_flow.value < 0 else 'Break-even') }} · {% endif %}{{ kind_label(m.monthly_cash_flow.kind) }}</span></div>
-      <div role="listitem"><span class="k">Monthly NOI</span><span class="v">{{ fmt(m.monthly_noi, 'usd') }}</span><span class="s">{{ kind_label(m.monthly_noi.kind) }}</span></div>
-      <div role="listitem"><span class="k">Cap rate</span><span class="v">{{ fmt(m.cap_rate_pct, 'pct') }}</span><span class="s">{{ kind_label(m.cap_rate_pct.kind) }}</span></div>
-      <div role="listitem"><span class="k">Cash-on-cash</span><span class="v">{{ fmt(m.cash_on_cash_pct, 'pct') }}</span><span class="s">{{ kind_label(m.cash_on_cash_pct.kind) }}</span></div>
+  <section class="wrap results" aria-labelledby="results-h">
+    <p class="eyebrow">Results</p>
+    <h2 id="results-h" tabindex="-1">{{ a.location.address.value }}</h2>
+    <p class="muted small">ZIP {{ a.location.zip }}{% if a.location.county %} · {{ a.location.county }}{% endif %}{% if a.location.state %} · {{ a.location.state }}{% endif %} · generated {{ a.generated_at }}</p>
+
+    <div class="headline" role="group" aria-label="Headline result">
+      <div class="big">
+        <span class="label">Target purchase price · typical home in this ZIP</span>
+        <span class="num">{% if top.prices.target.kind == 'unavailable' %}Not reachable{% else %}Up to {{ top.prices.target.value | usd(false) }}{% endif %}</span>
+        <span class="sub">
+          {% if top.prices.target.kind == 'unavailable' %}Typical rent here is too low to reach a {{ a.assumptions.min_monthly_cash_flow.value | usd(false) }}/mo cash flow at any price.
+          {% else %}Keeps cash flow at or above {{ a.assumptions.min_monthly_cash_flow.value | usd(false) }}/mo after mortgage, tax, insurance, vacancy, management and maintenance.{% endif %}
+        </span>
+      </div>
+      <dl class="stats">
+        <div><dt>Typical rent</dt><dd>{{ money(a.market.typical_rent) }}<small>/mo</small></dd><dd class="tag">{{ kind_label(a.market.typical_rent.kind) }}</dd></div>
+        <div><dt>Typical home value in ZIP</dt><dd>{{ money(a.market.typical_home_value) }}</dd><dd class="tag">{{ kind_label(a.market.typical_home_value.kind) }}</dd></div>
+        <div><dt>Target vs. typical value</dt><dd>{% if top.at_target.pct_of_zip_home_value is defined %}{{ top.at_target.pct_of_zip_home_value }}%{% else %}—{% endif %}</dd><dd class="tag">Calculated</dd></div>
+      </dl>
     </div>
-    <p class="small">No buy/sell recommendation is made. Compare these figures with your own criteria.</p>
+    {% if top.at_target.pct_of_zip_home_value is defined and top.at_target.pct_of_zip_home_value < 100 %}
+    <p class="note">At these assumptions, rent supports about {{ top.at_target.pct_of_zip_home_value }}% of what homes typically cost in this ZIP. Buying at typical market prices would need more rent, a bigger down payment, or a lower cash-flow goal.</p>
+    {% endif %}
+    {% if a.qualifier.qualified %}<p class="note warn">{{ a.qualifier.note }}</p>{% endif %}
 
-    <h3>Property</h3>
-    <div class="tablewrap"><table>
-      <caption class="sr">Property facts</caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Value</th><th scope="col">Source type</th><th scope="col">Details</th></tr></thead>
-      <tbody>
-        {{ row('Address', analysis.property.address, 'text') }}
-        {{ row('Purchase price', analysis.property.purchase_price, 'usd0') }}
-        {{ row('Bedrooms', analysis.property.beds, 'text') }}
-        {{ row('State', analysis.property.state, 'text') }}
-        {% if analysis.property.sqft.kind != 'unavailable' %}{{ row('Square feet', analysis.property.sqft, 'text') }}{% endif %}
-      </tbody>
-    </table></div>
+    <h3>By bedroom count</h3>
+    <p class="muted small">We don't retrieve bedroom counts, so each size is shown. Rent for each size is a rough scaling of the ZIP's typical rent.</p>
+    <div class="cards">
+      {% for sc in a.scenarios[1:] %}
+      <article class="card" aria-labelledby="c-{{ sc.key }}">
+        <header>
+          <h4 id="c-{{ sc.key }}">{{ sc.label }}</h4>
+          <p class="rent">{{ money(sc.rent) }}<small>/mo rent · {{ kind_label(sc.rent.kind) }}</small></p>
+        </header>
+        <ul class="prices">
+          {% for key, title in [('target', 'Target price'), ('allin_breakeven', 'All-in break-even'), ('piti_breakeven', 'PITI break-even')] %}
+          {% set p = sc.prices[key] %}
+          <li class="{{ key }}">
+            <div class="line"><span>{{ title }}</span><strong>{{ money(p) }}</strong></div>
+            {% if p.kind != 'unavailable' %}<div class="track" aria-hidden="true"><span style="width: {{ (p.value / ns.max * 100) | round(1) }}%"></span></div>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% if sc.monthly_at_price.target %}
+        {% set m = sc.monthly_at_price.target %}
+        <details>
+          <summary>Monthly math at the target price</summary>
+          <table>
+            <caption class="sr">Monthly costs at the {{ sc.label }} target price</caption>
+            <tbody>
+              <tr><th scope="row">Rent</th><td class="n">{{ m.gross_rent | usd }}</td></tr>
+              <tr><th scope="row">Principal and interest</th><td class="n">−{{ m.principal_interest | usd }}</td></tr>
+              <tr><th scope="row">Property tax</th><td class="n">−{{ m.property_tax | usd }}</td></tr>
+              <tr><th scope="row">Insurance</th><td class="n">−{{ m.insurance | usd }}</td></tr>
+              <tr class="sub"><th scope="row">PITI total</th><td class="n">{{ m.piti_total | usd }}</td></tr>
+              <tr><th scope="row">Vacancy + management</th><td class="n">−{{ (m.vacancy + m.management) | usd }}</td></tr>
+              <tr><th scope="row">Maintenance reserve</th><td class="n">−{{ m.capex_reserve | usd }}</td></tr>
+              {% if m.hoa %}<tr><th scope="row">HOA</th><td class="n">−{{ m.hoa | usd }}</td></tr>{% endif %}
+              <tr class="total"><th scope="row">Cash flow</th><td class="n">{{ m.cash_flow | usd }}</td></tr>
+            </tbody>
+          </table>
+          <p class="small muted">Down payment {{ m.down_payment | usd(false) }}. Cap rate {{ sc.at_target.cap_rate_pct | pct }}; cash-on-cash {{ sc.at_target.cash_on_cash_pct | pct }} (down payment only).</p>
+        </details>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
 
-    <h3>Monthly income and operating expenses</h3>
-    <div class="tablewrap"><table>
-      <caption class="sr">Monthly income and operating expenses, excluding mortgage payments</caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Per month</th><th scope="col">Source type</th><th scope="col">Details</th></tr></thead>
-      <tbody>
-        {{ row('Gross rent', analysis.breakdown.gross_rent) }}
-        {{ row('Vacancy allowance', analysis.breakdown.vacancy) }}
-        {{ row('Property management', analysis.breakdown.management) }}
-        {{ row('Property tax', analysis.breakdown.property_tax) }}
-        {{ row('Insurance', analysis.breakdown.insurance) }}
-        {{ row('HOA', analysis.breakdown.hoa) }}
-        {{ row('Maintenance / CapEx reserve', analysis.breakdown.capex_reserve) }}
-        {{ row('Total operating expenses', analysis.breakdown.operating_expenses_total) }}
-        {{ row('Net operating income (NOI)', m.monthly_noi) }}
-      </tbody>
-    </table></div>
-
-    <h3>Financing (debt service, separate from operating expenses)</h3>
-    <div class="tablewrap"><table>
-      <caption class="sr">Financing</caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Value</th><th scope="col">Source type</th><th scope="col">Details</th></tr></thead>
-      <tbody>
-        {{ row('Down payment', analysis.financing.down_payment) }}
-        {{ row('Loan amount', analysis.financing.loan_amount) }}
-        {{ row('Principal and interest', analysis.financing.monthly_principal_interest) }}
-        {{ row('Cash flow (NOI − principal and interest)', m.monthly_cash_flow) }}
-        {{ row('Cap rate', m.cap_rate_pct, 'pct') }}
-        {{ row('Cash-on-cash return', m.cash_on_cash_pct, 'pct') }}
-      </tbody>
-    </table></div>
+    <h3>How to read the prices</h3>
+    <dl class="defs">
+      <dt>PITI break-even</dt><dd>The price where rent exactly covers principal, interest, property tax and insurance. An upper bound: it ignores vacancy and upkeep.</dd>
+      <dt>All-in break-even</dt><dd>The price where cash flow is $0 after PITI plus vacancy ({{ a.assumptions.vacancy_pct.value | int }}%), management ({{ a.assumptions.management_pct.value | int }}%) and a maintenance reserve ({{ a.assumptions.capex_reserve_pct.value | int }}% of price per year).</dd>
+      <dt>Target price</dt><dd>The highest price that still leaves your cash-flow goal each month. Prices are rounded down to the nearest $1,000.</dd>
+    </dl>
 
     <h3>Assumptions</h3>
-    <div class="tablewrap"><table>
+    <div class="tablewrap"><table class="grid-table">
       <caption class="sr">Assumptions used</caption>
-      <thead><tr><th scope="col">Assumption</th><th scope="col">Value</th><th scope="col">Source type</th><th scope="col">Details</th></tr></thead>
+      <thead><tr><th scope="col">Assumption</th><th scope="col">Value</th><th scope="col">Source type</th><th scope="col">Basis</th></tr></thead>
       <tbody>
-        {{ row('Down payment', analysis.assumptions.down_payment_pct, 'pct') }}
-        {{ row('Interest rate', analysis.assumptions.annual_interest_rate_pct, 'pct') }}
-        {{ row('Loan term (years)', analysis.assumptions.loan_term_years, 'text') }}
-        {{ row('Vacancy', analysis.assumptions.vacancy_pct, 'pct') }}
-        {{ row('Management fee', analysis.assumptions.management_pct, 'pct') }}
-        {{ row('Property tax rate (per year)', analysis.assumptions.property_tax_rate_pct, 'pct') }}
-        {{ row('Insurance rate (per year)', analysis.assumptions.insurance_rate_pct, 'pct') }}
+        {% for key, label in [('down_payment_pct','Down payment'),('annual_interest_rate_pct','Interest rate'),('loan_term_years','Loan term (years)'),('min_monthly_cash_flow','Cash flow goal'),('rent_adjustment_pct','Rent adjustment'),('property_tax_rate_pct','Property tax rate (per year)'),('insurance_rate_pct','Insurance rate (per year)'),('hoa_monthly','HOA'),('vacancy_pct','Vacancy'),('management_pct','Management'),('capex_reserve_pct','Maintenance reserve')] %}
+        {% set f = a.assumptions[key] %}
+        <tr><th scope="row">{{ label }}</th>
+          <td class="n">{% if f.kind == 'unavailable' %}Unknown{% elif key in ['min_monthly_cash_flow', 'hoa_monthly'] %}{{ f.value | usd(false) }}{% else %}{{ f.value }}{% if f.unit and f.unit.startswith('%') %}%{% endif %}{% endif %}</td>
+          <td>{{ kind_label(f.kind) }}</td>
+          <td class="small muted">{{ f.basis or f.source or f.reason or '' }}</td></tr>
+        {% endfor %}
       </tbody>
     </table></div>
 
-    <h3>Limitations</h3>
-    <ul class="limits">
-      {% for text in analysis.limitations %}<li>{{ text }}</li>{% endfor %}
+    <h3>Data sources</h3>
+    <ul class="sources">
+      {% for s in a.sources %}<li><strong>{{ s.name }}</strong> — {{ s.used_for }}{% if s.url %} · <a href="{{ s.url }}" rel="noopener noreferrer">{{ s.url }}</a>{% endif %}</li>{% endfor %}
     </ul>
+
+    <h3>Limitations</h3>
+    <ul class="limits">{% for text in a.limitations %}<li>{{ text }}</li>{% endfor %}</ul>
   </section>
   {% endif %}
 </main>
 
-<footer class="site">
-  <div class="wrap small">
-    DealScope is decision support for a first look, not a guarantee of any figure. Version {{ version }}.
-    {% if provider_enabled %}Addresses you enter are sent to the property data provider.{% else %}Addresses are not sent to any third party in this deployment.{% endif %}
-    Nothing you enter is stored.
+<footer class="foot">
+  <div class="wrap small muted">
+    <p>DealScope is decision support for a first look. It does not give financial, tax, legal, insurance, appraisal, or lending advice and does not predict returns. Verify rents, taxes, insurance and condition locally before deciding.</p>
+    <p>{% if lookup_enabled %}The address you enter is sent to the US Census Bureau Geocoder to find its ZIP code.{% else %}Address lookup is off; nothing is sent to third parties.{% endif %} Nothing you enter is stored. Rent and home-value indexes: Zillow Research data. Version {{ version }}.</p>
   </div>
 </footer>
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>

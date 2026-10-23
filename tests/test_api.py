@@ -4,79 +4,79 @@ import logging
 import pytest
 
 from dealscope.errors import ProviderTimeout, ProviderUnavailable
-from dealscope.provider import Candidate
-from tests.conftest import FakeProvider, make_client, retrieved_facts
+from tests.conftest import FakeGeocoder, loc, make_client
 
-MANUAL = {
-    "address": "100 Example St, Austin, TX",
-    "property": {"purchase_price": 400000, "beds": 3, "state": "TX", "hoa_monthly": 0},
-    "assumptions": {"monthly_rent": 2800},
-}
+BODY = {"address": "100 Example St, Austin, TX"}
 
 
 def post(client, body, **kw):
     return client.post("/analyze", json=body, **kw)
 
 
-def test_manual_analysis_succeeds_and_matches_golden_numbers(client):
-    resp = post(client, MANUAL)
+def test_address_only_request_succeeds_with_prices_by_bedroom(client):
+    resp = post(client, BODY)
     assert resp.status_code == 200
     a = resp.get_json()["analysis"]
-    assert a["financing"]["monthly_principal_interest"]["value"] == 2128.97
-    assert a["metrics"]["monthly_cash_flow"]["value"] == -1086.30
-    assert a["metrics"]["cap_rate_pct"]["value"] == 3.13
-    assert a["metrics"]["cash_on_cash_pct"]["value"] == -16.29
-    assert a["breakdown"]["operating_expenses_total"]["value"] == 1757.33
-    assert "verdict" not in json.dumps(a).lower()
-
-
-def test_lookup_single_candidate_succeeds(lookup_client):
-    client, provider = lookup_client
-    resp = post(client, {"address": "100 Example St"})
-    assert resp.status_code == 200
-    assert resp.get_json()["analysis"]["property"]["purchase_price"]["kind"] == "retrieved"
-    assert [c[0] for c in provider.calls] == ["search", "get_property"]
-
-
-def test_ambiguous_matches_require_selection_and_never_analyze_first():
-    provider = FakeProvider(
-        candidates=[Candidate("1", "1 A St"), Candidate("2", "1 A St Unit 2")],
-        facts=retrieved_facts(),
+    assert a["location"]["zip"] == "78701" and a["market"]["typical_rent"]["value"] == 3177
+    assert [s["key"] for s in a["scenarios"]] == ["typical", "1br", "2br", "3br", "4br"]
+    typical = a["scenarios"][0]["prices"]
+    assert (
+        typical["piti_breakeven"]["value"]
+        > typical["allin_breakeven"]["value"]
+        >= typical["target"]["value"]
+        > 0
     )
-    resp = post(make_client(provider), {"address": "1 A St, Austin"})
-    body = resp.get_json()
-    assert resp.status_code == 422 and body["error"]["code"] == "AMBIGUOUS_MATCH"
-    assert [c["id"] for c in body["error"]["candidates"]] == ["1", "2"]
-    assert all(call[0] != "get_property" for call in provider.calls)
 
 
-def test_candidate_id_skips_search():
-    provider = FakeProvider(facts=retrieved_facts())
-    resp = post(make_client(provider), {"address": "1 A St, Austin", "candidate_id": "2"})
-    assert resp.status_code == 200 and provider.calls == [("get_property", "2")]
+def test_assumptions_change_the_answer(client):
+    base = post(client, BODY).get_json()["analysis"]["scenarios"][0]["prices"]["target"]["value"]
+    high_rate = post(client, dict(BODY, assumptions={"annual_interest_rate_pct": 9.5}))
+    assert high_rate.get_json()["analysis"]["scenarios"][0]["prices"]["target"]["value"] < base
 
 
-def test_property_not_found():
-    resp = post(make_client(FakeProvider(candidates=[])), {"address": "999 Nowhere Rd"})
+def test_ambiguous_matches_require_selection(market):
+    geo = FakeGeocoder([loc("1 A ST, AUSTIN, TX, 78701"), loc("1 A ST, AUSTIN, TX, 78702")])
+    resp = post(make_client(market, geo), BODY)
+    err = resp.get_json()["error"]
+    assert resp.status_code == 422 and err["code"] == "AMBIGUOUS_MATCH"
+    assert [c["id"] for c in err["candidates"]] == [
+        "1 A ST, AUSTIN, TX, 78701",
+        "1 A ST, AUSTIN, TX, 78702",
+    ]
+
+
+def test_address_not_found(market):
+    resp = post(make_client(market, FakeGeocoder([])), BODY)
     assert resp.status_code == 404 and resp.get_json()["error"]["code"] == "PROPERTY_NOT_FOUND"
 
 
-def test_missing_price_is_insufficient_data_not_a_fabricated_default():
-    provider = FakeProvider(candidates=[Candidate("1", "x")], facts=retrieved_facts(price=None))
-    resp = post(make_client(provider), {"address": "100 Example St"})
-    err = resp.get_json()["error"]
-    assert resp.status_code == 422 and err["code"] == "INSUFFICIENT_DATA"
-    assert err["missing"] == ["price"] and err["manual_entry_required"] is True
-
-
-def test_disabled_provider_asks_for_manual_entry(client):
-    resp = post(client, {"address": "100 Example St, Austin, TX"})
+@pytest.mark.parametrize(
+    "location,missing",
+    [
+        (loc(zip=None), "zip"),
+        (loc(zip="59001", state="MT"), "rent"),  # ZIP known but no rent index value
+        (loc(zip="00000"), "rent"),  # ZIP not in snapshot
+    ],
+)
+def test_missing_area_data_is_insufficient_data_not_a_fabricated_rent(market, location, missing):
+    resp = post(make_client(market, FakeGeocoder([location])), BODY)
     err = resp.get_json()["error"]
     assert (
-        resp.status_code == 422
-        and err["code"] == "INSUFFICIENT_DATA"
-        and err["manual_entry_required"]
+        resp.status_code == 422 and err["code"] == "INSUFFICIENT_DATA" and missing in err["missing"]
     )
+
+
+def test_state_without_average_rates_asks_for_them(market):
+    geo = FakeGeocoder(
+        [loc("1600 PENNSYLVANIA AVE NW, WASHINGTON, DC, 20500", zip="20500", state="DC")]
+    )
+    err = post(make_client(market, geo), BODY).get_json()["error"]
+    assert err["code"] == "INSUFFICIENT_DATA" and err["needs_rates"] is True
+    ok = post(
+        make_client(market, geo),
+        dict(BODY, assumptions={"property_tax_rate_pct": 0.6, "insurance_rate_pct": 0.5}),
+    )
+    assert ok.status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -86,8 +86,8 @@ def test_disabled_provider_asks_for_manual_entry(client):
         (ProviderUnavailable(), 502, "PROVIDER_UNAVAILABLE"),
     ],
 )
-def test_provider_failures_map_to_status_and_retryable(error, status, code):
-    resp = post(make_client(FakeProvider(error=error)), {"address": "100 Example St"})
+def test_provider_failures_map_to_status_and_retryable(market, error, status, code):
+    resp = post(make_client(market, FakeGeocoder(error=error)), BODY)
     body = resp.get_json()["error"]
     assert resp.status_code == status and body["code"] == code and body["retryable"] is True
 
@@ -97,13 +97,14 @@ def test_provider_failures_map_to_status_and_retryable(error, status, code):
     [
         ({}, 400, "INVALID_REQUEST"),
         ({"address": "100 Example St", "bogus": 1}, 400, "INVALID_REQUEST"),
+        ({"address": "100 Example St", "property": {"purchase_price": 1}}, 400, "INVALID_REQUEST"),
         (
             {"address": "100 Example St", "assumptions": {"annual_interest_rate_pct": 99}},
             400,
             "OUT_OF_RANGE",
         ),
         (
-            {"address": "100 Example St", "assumptions": {"annual_interest_rate_pct": "NaN"}},
+            {"address": "100 Example St", "assumptions": {"annual_interest_rate_pct": "7"}},
             400,
             "INVALID_REQUEST",
         ),
@@ -135,12 +136,12 @@ def test_oversized_body_rejected(client):
     assert resp.status_code == 413 and resp.get_json()["success"] is False
 
 
-def test_unexpected_exception_never_leaks_details():
-    class Boom(FakeProvider):
-        def search(self, address, deadline=None):
+def test_unexpected_exception_never_leaks_details(market):
+    class Boom(FakeGeocoder):
+        def geocode(self, address, deadline=None):
             raise RuntimeError("secret-token-123 /etc/passwd")
 
-    resp = post(make_client(Boom()), {"address": "100 Example St"})
+    resp = post(make_client(market, Boom()), BODY)
     text = resp.get_data(as_text=True)
     assert resp.status_code == 500 and "secret" not in text and "passwd" not in text
     body = resp.get_json()["error"]
@@ -164,37 +165,35 @@ def test_request_id_header_is_generated_and_echoed(client):
 
 
 def test_cors_off_by_default(client):
-    resp = client.post("/analyze", json=MANUAL, headers={"Origin": "https://evil.example"})
+    resp = client.post("/analyze", json=BODY, headers={"Origin": "https://evil.example"})
     assert "Access-Control-Allow-Origin" not in resp.headers
 
 
-def test_cors_only_for_configured_origin():
-    client = make_client(cors_origins=("https://app.example",))
-    ok = client.post("/analyze", json=MANUAL, headers={"Origin": "https://app.example"})
-    other = client.post("/analyze", json=MANUAL, headers={"Origin": "https://evil.example"})
+def test_cors_only_for_configured_origin(market):
+    client = make_client(market, cors_origins=("https://app.example",))
+    ok = client.post("/analyze", json=BODY, headers={"Origin": "https://app.example"})
+    other = client.post("/analyze", json=BODY, headers={"Origin": "https://evil.example"})
     assert ok.headers.get("Access-Control-Allow-Origin") == "https://app.example"
     assert "Access-Control-Allow-Origin" not in other.headers
 
 
-def test_rate_limit_returns_429():
-    client = make_client(rate_limit="2/minute")
-    codes = [post(client, MANUAL).status_code for _ in range(3)]
+def test_rate_limit_returns_429(market):
+    client = make_client(market, rate_limit="2/minute")
+    codes = [post(client, BODY).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
-    assert post(client, MANUAL).get_json()["error"]["code"] == "RATE_LIMITED"
-    assert client.get("/healthz").status_code == 200  # health is never limited
+    assert post(client, BODY).get_json()["error"]["code"] == "RATE_LIMITED"
+    assert client.get("/healthz").status_code == 200
 
 
-def test_logs_exclude_address_and_body(caplog):
-    client = make_client()
+def test_logs_exclude_address_and_body(client, caplog):
     with caplog.at_level(logging.INFO, logger="dealscope"):
-        post(client, MANUAL)
+        post(client, {"address": "77 Secret Lane, Nowhere, ZZ"})
         post(
             client,
             {"address": "77 Secret Lane, Nowhere, ZZ", "assumptions": {"down_payment_pct": 1}},
         )
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "Example St" not in text and "Secret Lane" not in text and "400000" not in text
+    assert "Secret Lane" not in text and "Example St" not in text
     records = [json.loads(r.getMessage()) for r in caplog.records]
-    assert {r["status"] for r in records} == {200, 400}
-    assert {"request_id", "route", "latency_ms", "error_code"} <= set(records[0])
+    assert {"request_id", "route", "latency_ms", "error_code", "status"} <= set(records[0])
     assert records[1]["error_code"] == "OUT_OF_RANGE"

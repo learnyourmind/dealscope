@@ -14,7 +14,7 @@
 
 ## Current state (as of this plan)
 
-Phase D tooling, Phase 1 (reliable foundation) and Phase 2 (usable UI) are implemented in the repository, with 137 tests at 97% coverage. The provider ships **disabled** (manual entry is the launch path, FR-22 promoted to P0). What remains is human work: GitHub branch protection, Vercel Git integration, the rollback rehearsal, the provider-terms decision (P0-1), brand input, and wording/privacy review; plus Phase 3 features. Baseline defects `BD-01…BD-11` (spec §2.1) are closed except `BD-09` (comps; deferred to 3.3).
+Phases D, 1, 2 and 4 are implemented, with 152 tests at 97% coverage. **Phase 4 (owner direction 2026-10-23) replaced manual entry and the Redfin adapter**: the address is the only input, data comes from the Census Geocoder and a bundled Zillow Research ZIP snapshot, and the app computes the price a rental can support. Phase 1–2 rows below that mention manual entry or the provider are historical. What remains is human work: GitHub branch protection, Vercel Git integration, the rollback rehearsal, the provider-terms decision (P0-1), brand input, and wording/privacy review; plus Phase 3 features. Baseline defects `BD-01…BD-11` (spec §2.1) are closed except `BD-09` (comps; deferred to 3.3).
 
 ## Phase D — Delivery foundation
 
@@ -38,10 +38,10 @@ These cannot be coded around. Record each outcome in spec §12 (decision log).
 
 | ID | Decision | Blocks | Who | Status |
 |---|---|---|---|---|
-| P0-1 | Provider terms: is Redfin's unofficial endpoint permitted for this use, display, and caching? If not, choose a supported provider or ship manual entry only (FR-22 becomes P0). | 1.5 against live data, any public launch | H | blocked on owner/legal |
-| P0-2 | Approve or amend the proposed defaults in spec §11.1 (D-01…D-10) | 1.2, 1.3, 1.10, 2.x copy | H | todo |
-| P0-3 | Brand kit, or accept the neutral fallback (spec §5.4) | 2.1 styling | H | todo |
-| P0-4 | Privacy/retention stance for addresses in logs and the provider disclosure text | 1.9, 2.3 | H | todo |
+| P0-1 | Data-source terms. Owner chose Redfin, then redirected to free public sources (ADR-0005). Remaining: confirm Zillow Research data terms for wide/commercial use (4.6). | Wide public promotion | H | narrowed; Census use is fine |
+| P0-2 | Approve or amend the proposed defaults in spec §11.1 (D-01…D-10) | 1.2, 1.3, 1.10, 2.x copy | H | approved 2026-10-23 (owner, in chat) |
+| P0-3 | Brand kit, or accept the neutral fallback (spec §5.4) | 2.1 styling | H | approved 2026-10-23: neutral fallback |
+| P0-4 | Privacy/retention stance for addresses in logs and the provider disclosure text | 1.9, 2.3 | H | approved 2026-10-23: as built; re-review v0.3 wording (4.7) |
 
 ## Phase 1 — Reliable analysis foundation (spec §8 Phase 1)
 
@@ -92,6 +92,18 @@ Start each only after its data rights and definitions exist (spec §8 Phase 3). 
 | 3.8 | Staging environment gating; nightly provider-contract tests; alerting | OPS-09, OPS-10, OPS-11 | later |
 | 3.9 | Pin runtime dependency versions (lockfile or `==` pins) and enable Dependabot review routine | OPS-08, spec §7 P0-7 | later (Dependabot config already added) |
 
+## Phase 4 — Address-only buy box (owner direction 2026-10-23, spec v0.3)
+
+| ID | Task | Satisfies | Depends | Who | Status | Done when |
+|---|---|---|---|---|---|---|
+| 4.1 | Replace manual entry and Redfin with Census geocoding + bundled Zillow ZIP snapshot; price solver (PITI break-even, all-in break-even, target) per bedroom scenario; remove `property`/`candidate_id` inputs | FR-02…FR-07, FR-09…FR-11, FR-22 withdrawn | — | AI | done | Solver round-trip and golden price-vector tests pass; address-only request returns prices; live Census lookup verified once manually |
+| 4.2 | Redesigned UI: address-first hero, headline price, bedroom cards with bars, monthly-math drill-down, assumptions, sources, limitations; no third-party requests | FR-01, FR-05, FR-08, FR-12, §5.4 | 4.1 | AI | done | Rendered and checked in the browser; axe run on production after deploy |
+| 4.3 | Update `intent.md`, `spec.md` v0.3, README, ADR-0005, runbook | FR-13 | 4.1 | AI | done | Docs match shipped behavior |
+| 4.4 | Monthly snapshot refresh: scheduled workflow runs `scripts/update_market_data.py` and opens a PR; review as-of dates | OPS-10 | 4.1 | AI+H | todo | PR opened automatically on schedule |
+| 4.5 | County-level property tax (and optionally rent) from Census ACS with a free API key supplied via host secret | spec §7 | owner obtains a free key | AI+H | todo | Tax rate shown as county-level public data; fixtures from the documented ACS response shape |
+| 4.6 | Bedroom-level rent from a permitted source; rent ranges; confirm Zillow terms for wide/commercial use | FR-14, spec §7 gate | P0-1 | H | todo | Heuristic factors removed or validated |
+| 4.7 | Product/legal review of price wording ("up to", "target"); screen-reader pass | FR-11 | 4.2 | H | todo | Recorded in the decision log |
+
 ## Cross-cutting definition of done (every task)
 
 1. The test(s) named in **Done when** exist, failed before the change, and pass now.
@@ -104,7 +116,7 @@ Start each only after its data rights and definitions exist (spec §8 Phase 3). 
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| P0-1 (provider terms) is denied or slow | Live data path cannot ship | Keep `PROPERTY_PROVIDER=disabled`; promote 3.1 manual entry to Phase 2; adapters stay behind the provider interface |
+| Zillow Research terms do not permit wide or commercial use | Rent/value snapshot must be replaced | Sources sit behind `MarketData`; swap in a permitted ZIP rent source (4.6) |
 | Redfin payload shape differs from assumptions in 1.5 | Adapter rework | Capture a few real responses **only if P0-1 permits**, scrub, store as fixtures; otherwise write fixtures from the field names already used in `app.py` and mark them synthetic |
 | Serverless cold starts on Vercel | Slow first request, smoke retries | `smoke.sh` retries; note in runbook |
 | Spec defaults (§11.1) change after Phase 1 | Rework in 1.2/1.3/1.10 | Keep bounds and assumptions in one module each; golden vectors are data, not code |

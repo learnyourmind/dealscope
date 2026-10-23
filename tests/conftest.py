@@ -1,61 +1,60 @@
+import json
+
 import pytest
 
 from app import create_app
-from dealscope.analysis import Fact, PropertyFacts
 from dealscope.config import Config
-from dealscope.provider import Candidate, PropertyProvider
+from dealscope.provider import Geocoder, Location, MarketData
+
+DATA = {
+    "rent": {"name": "Zillow Observed Rent Index (ZORI)", "as_of": "2026-09"},
+    "value": {"name": "Zillow Home Value Index (ZHVI)", "as_of": "2026-09"},
+    "zips": {
+        "78701": [3177, 650693, "TX"],
+        "44102": [1356, 130988, "OH"],
+        "59001": [None, 448166, "MT"],
+        "20500": [3000, 700000, "DC"],
+    },
+}
 
 
-class FakeProvider(PropertyProvider):
-    """Test double: no network. Configure `candidates`, `facts`, or `error`."""
+def loc(
+    address="100 EXAMPLE ST, AUSTIN, TX, 78701", zip="78701", state="TX", county="Travis County"
+):
+    return Location(address=address, zip=zip, state=state, county=county)
+
+
+class FakeGeocoder(Geocoder):
+    """Test double: no network. Configure `locations` or `error`."""
 
     name = "fake"
 
-    def __init__(self, candidates=None, facts=None, error=None):
-        self.candidates = candidates if candidates is not None else []
-        self.facts = facts
+    def __init__(self, locations=None, error=None):
+        self.locations = [loc()] if locations is None else locations
         self.error = error
         self.calls = []
 
-    def search(self, address, deadline=None):
-        self.calls.append(("search", address))
+    def geocode(self, address, deadline=None):
+        self.calls.append(address)
         if self.error:
             raise self.error
-        return self.candidates
-
-    def get_property(self, candidate, deadline=None):
-        self.calls.append(("get_property", candidate.id))
-        if self.error:
-            raise self.error
-        return self.facts
+        return self.locations
 
 
-def retrieved_facts(
-    price=400000, beds=3, state="TX", hoa=0.0, address="100 Example St, Austin, TX"
-):
-    def f(v):
-        return None if v is None else Fact(v, "retrieved", "fake", "2026-01-01T00:00:00+00:00")
-
-    return PropertyFacts(
-        address=f(address), price=f(price), beds=f(beds), state=f(state), hoa_monthly=f(hoa)
-    )
+@pytest.fixture()
+def market(tmp_path):
+    path = tmp_path / "zip_market.json"
+    path.write_text(json.dumps(DATA))
+    return MarketData(path)
 
 
-def make_client(provider=None, **config):
+def make_client(market, geocoder=None, **config):
     cfg = Config(rate_limit=config.pop("rate_limit", ""), **config)
-    app = create_app(cfg, provider)
+    app = create_app(cfg, geocoder or FakeGeocoder(), market)
     app.config["TESTING"] = False  # exercise real error handlers
     return app.test_client()
 
 
 @pytest.fixture()
-def client():
-    return make_client()
-
-
-@pytest.fixture()
-def lookup_client():
-    provider = FakeProvider(
-        candidates=[Candidate("111", "100 Example St, Austin, TX")], facts=retrieved_facts()
-    )
-    return make_client(provider), provider
+def client(market):
+    return make_client(market)
