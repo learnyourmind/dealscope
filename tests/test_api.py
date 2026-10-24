@@ -271,3 +271,26 @@ def test_record_with_rent_but_no_details_says_so_instead_of_blaming_configuratio
     assert h["label"] == "This home" and h["configuration"]["status"] == "not_identified"
     assert "no bedroom, bathroom, or size details" in h["configuration"]["beds"]["reason"]
     assert "no permitted source" not in h["configuration"]["beds"]["reason"]
+
+
+def test_cap_exhaustion_degrades_visibly_without_failing(market):
+    from dealscope.homes import BudgetedHomes
+
+    client = make_client(market, homes=BudgetedHomes(FakeHomes(home_record()), daily_cap=1))
+    first = post(client, BODY).get_json()["analysis"]["home"]
+    second = post(client, BODY)
+    reason = second.get_json()["analysis"]["home"]["configuration"]["beds"]["reason"]
+    assert first["label"] == "This home"
+    assert second.status_code == 200 and "lookup quota" in reason
+
+
+def test_robots_txt_disallows_the_api(client):
+    resp = client.get("/robots.txt")
+    assert resp.status_code == 200 and "Disallow: /analyze" in resp.get_data(as_text=True)
+
+
+def test_provider_disclaimer_is_shown_when_provider_data_is_used(market):
+    shown = post(make_client(market, homes=FakeHomes(home_record())), BODY).get_json()
+    plain = post(make_client(market), BODY).get_json()
+    assert any("not appraisals or guarantees" in t for t in shown["analysis"]["limitations"])
+    assert not any("RentCast" in t for t in plain["analysis"]["limitations"])

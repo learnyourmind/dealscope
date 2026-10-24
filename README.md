@@ -48,11 +48,12 @@ Success: `{"success": true, "analysis": {location, market, assumptions, home, qu
 
 ```bash
 make install   # one-time: .venv + dependencies
-make check     # lint, format check, tests with coverage gate
+make check     # lint, format check, secret scan, tests with coverage gate
+make hooks     # enable the pre-commit secret scan for this clone
 make run       # dev server on http://localhost:5000
 ```
 
-Contributing with an AI agent? Read [`docs/ai-sdlc.md`](./docs/ai-sdlc.md) and [`AGENTS.md`](./AGENTS.md).
+Contributing with an AI agent? Read [`docs/ai-sdlc.md`](./docs/ai-sdlc.md) (task loop, human gates, guardrails, mapping to Anthropic's Claude Code guidance) and [`AGENTS.md`](./AGENTS.md). Hooks and skills you install yourself are in [`docs/claude-config/`](./docs/claude-config/README.md).
 
 ## Deployment
 

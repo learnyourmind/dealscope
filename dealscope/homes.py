@@ -18,11 +18,14 @@ import json
 import logging
 import math
 import re
+import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import requests
 
+from .errors import ProviderRateLimited
 from .provider import http_get_json
 
 log = logging.getLogger("dealscope")
@@ -134,7 +137,39 @@ class RentCastHomes(HomeRecords):
         return record if has_anything else None
 
 
-def build_homes(api_key: str, connect_timeout: float, read_timeout: float) -> HomeRecords:
-    if api_key.strip():
-        return RentCastHomes(api_key.strip(), connect_timeout, read_timeout)
-    return HomeRecords()
+class BudgetedHomes(HomeRecords):
+    """Soft per-process daily cap in front of a paid lookup source.
+
+    Every attempt counts (successful or not). When the day's budget is spent it raises
+    ProviderRateLimited, which the service turns into a visible typical-home fallback, so a
+    burst of visitors cannot spend the provider's quota or incur overage charges unboundedly
+    from one instance. Serverless hosts run several instances, each with its own counter, so
+    this is a brake, not a guarantee: cap overage billing in the provider account as well.
+    """
+
+    def __init__(self, inner: HomeRecords, daily_cap: int):
+        self.inner, self.daily_cap = inner, daily_cap
+        self.name = inner.name
+        self.enabled = inner.enabled
+        self._day, self._count = "", 0
+        self._lock = threading.Lock()
+
+    def lookup(self, address: str, deadline: Optional[float] = None) -> Optional[HomeRecord]:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self._lock:
+            if today != self._day:
+                self._day, self._count = today, 0
+            if self._count >= self.daily_cap:
+                log.warning(json.dumps({"event": "home_lookup_cap", "source": self.name}))
+                raise ProviderRateLimited()
+            self._count += 1
+        return self.inner.lookup(address, deadline)
+
+
+def build_homes(
+    api_key: str, connect_timeout: float, read_timeout: float, daily_cap: int = 0
+) -> HomeRecords:
+    if not api_key.strip():
+        return HomeRecords()
+    source = RentCastHomes(api_key.strip(), connect_timeout, read_timeout)
+    return BudgetedHomes(source, daily_cap) if daily_cap > 0 else source

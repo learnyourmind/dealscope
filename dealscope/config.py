@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 from typing import Tuple
 
 
+def _int(name: str, default: int, minimum: int = 0) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value >= minimum else default
+
+
 def _float(name: str, default: float) -> float:
     try:
         value = float(os.environ.get(name, default))
@@ -25,6 +33,9 @@ class Config:
     rate_limit: str = "20/minute"
     log_level: str = "INFO"
     max_body_bytes: int = 8 * 1024
+    # Soft per-instance daily cap on paid home lookups (0 = no cap). It is NOT a billing guard:
+    # each serverless instance counts separately. Cap overage billing in the provider account.
+    home_lookups_per_day: int = 10
     # Host secret. Never log or print it (repr=False keeps it out of tracebacks and logs).
     rentcast_api_key: str = field(default="", repr=False)
 
@@ -43,5 +54,6 @@ class Config:
             read_timeout_s=_float("UPSTREAM_READ_TIMEOUT_S", 8.0),
             rate_limit=os.environ.get("RATE_LIMIT", "20/minute"),
             log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+            home_lookups_per_day=_int("HOME_LOOKUPS_PER_DAY", 10),
             rentcast_api_key=os.environ.get("RENTCAST_API_KEY", "").strip(),
         )

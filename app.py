@@ -67,7 +67,10 @@ def create_app(
     )
     market = market or MarketData()
     homes = homes or build_homes(
-        config.rentcast_api_key, config.connect_timeout_s, config.read_timeout_s
+        config.rentcast_api_key,
+        config.connect_timeout_s,
+        config.read_timeout_s,
+        config.home_lookups_per_day,
     )
     parsed_rate = parse_rate(config.rate_limit)
     limiter = RateLimiter(*parsed_rate) if parsed_rate else None
@@ -197,6 +200,16 @@ def create_app(
                 "The request body must be JSON with a Content-Type of application/json."
             )
         return jsonify(run_analysis(payload, geocoder, market, homes, config.request_budget_s))
+
+    @app.route("/robots.txt")
+    def robots():
+        # A "commercially reasonable measure" against bulk scraping of provider data
+        # (RentCast terms 2(iii)); the real controls are the rate limit and the lookup cap.
+        return (
+            "User-agent: *\nDisallow: /analyze\n",
+            200,
+            {"Content-Type": "text/plain; charset=utf-8"},
+        )
 
     @app.route("/healthz")
     def healthz():

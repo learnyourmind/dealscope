@@ -1,0 +1,57 @@
+name: Refresh market data
+
+# Rebuilds data/zip_market.json from Zillow Research's public ZIP indexes and opens a PR for
+# review (plan 4.4). Runs monthly; also on demand from the Actions tab.
+#
+# CI does NOT run on a PR created with the default GITHUB_TOKEN (a GitHub rule), so the required
+# checks would never report. Add a fine-grained PAT as the repository secret DATA_REFRESH_TOKEN
+# (Contents + Pull requests: read/write) to make CI run. Without it the workflow still pushes the
+# branch; open the PR yourself or close and reopen it to trigger CI. Repository setting
+# "Allow GitHub Actions to create and approve pull requests" is needed for auto-opening the PR
+# with the default token.
+on:
+  schedule:
+    - cron: "0 14 5 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-market-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.DATA_REFRESH_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rebuild the snapshot
+        run: python scripts/update_market_data.py
+      - name: Open a PR when the data changed
+        env:
+          GH_TOKEN: ${{ secrets.DATA_REFRESH_TOKEN || github.token }}
+        run: |
+          if git diff --quiet -- data/zip_market.json; then
+            echo "No change in the published data."
+            exit 0
+          fi
+          month="$(date -u +%Y-%m)"
+          branch="data/refresh-${month}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add data/zip_market.json
+          git commit -m "Refresh ZIP market data (${month})"
+          git push --force-with-lease origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Refresh ZIP market data (${month})" \
+            --body "Automated rebuild from Zillow Research's public ZORI/ZHVI CSVs via scripts/update_market_data.py. Review the as-of dates in the diff and the app's smoke test before merging. Rent and value figures are area-level; attribution to Zillow Research is kept in the app." \
+            || echo "::warning::Branch ${branch} pushed, but the PR was not created. Open it manually or enable 'Allow GitHub Actions to create pull requests'."

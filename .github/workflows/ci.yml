@@ -31,6 +31,8 @@ jobs:
         run: ruff check .
       - name: Format check
         run: ruff format --check .
+      - name: Secret scan
+        run: python scripts/scan_secrets.py --all
       - name: Syntax check
         run: python -m py_compile app.py
       - name: Tests (with coverage gate)

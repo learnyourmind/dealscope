@@ -497,6 +497,12 @@ def build_analysis(
     ]
     if not hoa_known:
         limitations.append("HOA fees are unknown and counted as $0; results are qualified.")
+    if own_rent or identified:
+        limitations.append(
+            f"Property details and rent estimates come from {home.source}'s automated data. They "
+            "are probabilistic estimates, not appraisals or guarantees, and records can be "
+            "inaccurate or out of date (assessor records can lag)."
+        )
     if home_note:
         limitations.append(
             f"Home details could not be retrieved ({home_note}); showing a typical home in the ZIP."

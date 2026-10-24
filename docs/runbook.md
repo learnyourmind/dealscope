@@ -59,9 +59,22 @@ Target: restore the previous version in under 10 minutes without editing code.
 | Unexpected 429 | Per-instance rate limit (`RATE_LIMIT`) | Check for a client loop; raise only deliberately |
 | 401 from the URL | Vercel Deployment Protection on preview URLs | Use the production domain, or `vercel curl` / a bypass token for previews |
 
+## Owner checklist (cannot be done by an agent)
+
+- [ ] RentCast account: cap or disable overage billing; compare the usage page with expectations.
+- [ ] Confirm the RentCast and Zillow Research terms with a person (spec §7 summary is not legal advice).
+- [ ] Optional: repository setting "Allow GitHub Actions to create and approve pull requests", or a `DATA_REFRESH_TOKEN` secret, so the monthly data-refresh PR can open (and run CI).
+- [ ] Install the Claude hooks and skill from `docs/claude-config/` and run `make hooks`.
+- [ ] Optional: enable the Claude GitHub workflows (`docs/claude-config/README.md`).
+
+## Quota guard and data refresh
+
+- `HOME_LOOKUPS_PER_DAY` (default 10, `0` = off) is a soft per-instance cap on paid RentCast lookups. When it is spent, results fall back to the ZIP-typical home with a visible reason. Serverless runs several instances, so it is a brake, not a guarantee; the billing cap in RentCast is the real limit.
+- `.github/workflows/refresh-market-data.yml` rebuilds `data/zip_market.json` on the 5th of each month and opens a PR; review the as-of dates in the diff. Run it on demand from the Actions tab.
+
 ## Logs and data handling
 
-Logs are one-line JSON on stdout (Vercel captures them): request id, route, status, latency, error code — **not** addresses, request bodies, query strings, or upstream payloads (spec OPS-07). Do not add such fields while debugging; use a fixture. The service stores no user data.
+Logs are one-line JSON on stdout (Vercel captures them): request id, route, status, latency, error code; plus `upstream_error` (source, status, short code), `home_record` (response field names only), and `home_lookup_cap` events — **not** addresses, request bodies, query strings, or upstream payloads (spec OPS-07). Do not add such fields while debugging; use a fixture. The service stores no user data.
 
 ## Secrets
 

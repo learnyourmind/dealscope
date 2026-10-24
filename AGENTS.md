@@ -14,5 +14,6 @@ Essentials:
 - Test first; run `make check` before claiming anything works. Report failures and unrun checks honestly.
 - Never invent product behavior. If the spec is silent, record an open question and stop.
 - No live network in tests; no secrets, real addresses, or upstream payloads in the repo.
+- Never read, print, or commit a secret; `make scan` checks, `make hooks` enforces on commit.
 - Never present an estimate as a retrieved fact, or fill missing data with a plausible default.
 - Do not push, merge, change hosting, or touch production settings without explicit human approval.
