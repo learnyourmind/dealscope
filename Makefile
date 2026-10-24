@@ -3,7 +3,7 @@ PY ?= python3
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: help install run lint format test check audit docker smoke
+.PHONY: help install run lint format test check audit scan hooks docker smoke
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -26,8 +26,14 @@ format: ## Apply ruff formatting and safe fixes
 test: ## Run tests with the coverage gate
 	$(BIN)/python -m pytest
 
-check: lint test ## Everything CI runs, minus audit and docker
+check: lint scan test ## Everything CI runs, minus audit and docker
 	$(BIN)/python -m py_compile app.py
+
+scan: ## Scan tracked files for committed secrets (values are never printed)
+	$(PY) scripts/scan_secrets.py --all
+
+hooks: ## Enable the pre-commit secret scan for this clone
+	git config core.hooksPath .githooks
 
 audit: ## Scan dependencies for known vulnerabilities
 	$(BIN)/pip-audit -r requirements.txt

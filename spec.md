@@ -517,6 +517,12 @@ Data sources in use and their status (owner direction 2026-10-23: free public so
 | RentCast API (free Developer plan) | Home configuration and the home's own rent estimate | Keyed, licensed API; free plan = 50 requests/month, overage $0.20/request on that plan (cap or disable overage in the RentCast account). **Release gate:** read RentCast's terms (terms-api) for public display and caching before enabling the key in production. The address is sent to RentCast; the app discloses it. |
 | State tax/insurance tables | Estimates | Prototype constants of unknown provenance; labeled unverified. Replace with sourced data. |
 
+**Terms review (2026-10-24, AI summary of the published pages, not legal advice; a person should confirm).**
+
+- *RentCast API terms* — displaying and distributing API data to third parties is permitted (§1), no attribution is required (§3.4), and no caching duration is set (storing as needed for permitted uses). Obligations we must meet: keep commercially reasonable measures against scraping of the data through our site (§2(iii)) — rate limit, daily lookup cap, `robots.txt`; do not place unreasonable load (§2(vi)); show the estimates-are-not-appraisals disclaimer (§8.2) — shown in `limitations`; we are liable for charges on calls made with our key, including unauthorized ones, and overage can be billed immediately once it reaches $500 (§13) — cap or disable overage in the account; the owner indemnifies RentCast (§10). The terms do not address anonymous end users of a public site or the separate platform terms.
+- *Zillow Research data* — Zillow's developer documentation says the research data is free for public use under its Terms of Use with clear attribution to Zillow required; commercial use is not spelled out, and Zillow's terms prohibit automated querying and scraping (we use the published CSV downloads, not scraping). The data page itself could not be fetched, so the controlling Terms of Use and ZHVI guide remain a human check (plan 4.6). Attribution is shown in the footer and the `sources` list.
+- *Census Geocoder* — US government data; free; no key.
+
 Not used, deliberately: Zillow listing pages and APIs (scraping is not permitted; official access needs an approved application), Redfin's unofficial endpoints (terms unreviewed; the adapter was removed in v0.3), any listing-site scraping, and anything that bypasses access controls, rate limits, or bot protection. If a source's terms do not permit the use, disable it rather than work around it.
 
 ### Financial-content concern
@@ -661,6 +667,7 @@ Record each decision when made. Status: `proposed` → `approved` (by whom, when
 | 2026-10-23 | ADR-0005 | Address-only input; price-solver output; free public data | accepted | owner (chat) |
 | 2026-10-23 | FR-22 | Manual property entry withdrawn | approved | owner (chat) |
 | 2026-10-23 | ADR-0006 | Analyze one whole home, never room by room; remove the bedroom scenarios and heuristic | approved | owner (chat) |
+| 2026-10-24 | RentCast terms | Reviewed (summary): public display allowed, no attribution needed; must apply anti-scraping measures, show the estimate disclaimer, and cap overage billing. Daily lookup cap, `robots.txt`, and disclaimer added | owner to confirm and cap billing | owner |
 | 2026-10-23 | Incident | The RentCast key was committed to `.env.example` on public branch `feature/single-unit-home` (commit b14a61e; not on `main`). Owner rotated the key and set the new one in Vercel (plan 4.10); CI guard added (plan 4.12) | rotated; deleting the old branch is still open | owner |
 | 2026-10-23 | FR-23 source | Owner chose the free-tier property API option (RentCast) for the home's configuration and rent; owner supplied a rotated key in Vercel (Production only); verified live (3 bd / 2 ba / 1,878 sq ft record and rent estimate with range for the test address) | approved; verified live | owner (chat) |
 

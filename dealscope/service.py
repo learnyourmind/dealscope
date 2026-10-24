@@ -38,7 +38,7 @@ def _lookup_home(homes: Optional[HomeRecords], address: str, deadline: float):
     except ProviderAccessDenied:
         return None, "the property-data source could not be used right now"
     except ProviderRateLimited:
-        return None, "the property-data source is rate limited or its monthly quota is used up"
+        return None, "the property-data source is rate limited or its lookup quota is used up"
     except ProviderTimeout:
         return None, "the property-data source timed out"
     except ProviderUnavailable:

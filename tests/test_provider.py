@@ -361,3 +361,60 @@ def test_home_record_diagnostic_shows_a_missing_subject_property(caplog):
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert rec.rent == 1230.0 and rec.beds is None
     assert '"has_subject": false' in text and '"has_configuration": false' in text
+
+
+# ── soft daily lookup cap ──────────────────────────────────────────────────────
+
+from dealscope.homes import BudgetedHomes  # noqa: E402
+
+
+class CountingHomes:
+    name, enabled = "counting", True
+
+    def __init__(self, error=None):
+        self.calls, self.error = 0, error
+
+    def lookup(self, address, deadline=None):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return None
+
+
+def test_daily_cap_stops_lookups_after_the_budget_and_logs_it(caplog):
+    inner = CountingHomes()
+    h = BudgetedHomes(inner, daily_cap=2)
+    with caplog.at_level(logging.WARNING, logger="dealscope"):
+        h.lookup("a")
+        h.lookup("b")
+        with pytest.raises(ProviderRateLimited):
+            h.lookup("c")
+    assert inner.calls == 2  # the third attempt never reached the paid source
+    assert '"event": "home_lookup_cap"' in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_failed_attempts_count_against_the_budget():
+    inner = CountingHomes(error=ProviderTimeout())
+    h = BudgetedHomes(inner, daily_cap=1)
+    with pytest.raises(ProviderTimeout):
+        h.lookup("a")
+    with pytest.raises(ProviderRateLimited):
+        h.lookup("b")
+
+
+def test_budget_resets_on_a_new_utc_day():
+    inner = CountingHomes()
+    h = BudgetedHomes(inner, daily_cap=1)
+    h.lookup("a")
+    h._day = "1999-01-01"  # simulate yesterday's counter
+    h.lookup("b")
+    assert inner.calls == 2
+
+
+def test_budgeted_source_mirrors_the_inner_source_and_builder_wires_the_cap():
+    from dealscope.homes import RentCastHomes
+
+    assert isinstance(build_homes("k", 3, 8, daily_cap=5), BudgetedHomes)
+    assert isinstance(build_homes("k", 3, 8, daily_cap=0), RentCastHomes)  # 0 = no cap
+    assert build_homes("", 3, 8, daily_cap=5).enabled is False
+    assert BudgetedHomes(CountingHomes(), 3).enabled is True
